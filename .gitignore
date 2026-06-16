@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.zip
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Project-specific
+mcmonitor.db
+*.db
+runtime/
+site-packages/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test / dev artifacts
+_seltest_*.py

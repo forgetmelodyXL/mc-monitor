@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>注册 - MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-body">
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+<div class="auth-card">
+    <div class="auth-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h1>⛏ 注册新账号</h1>
+            <p class="auth-sub">创建你的专属监控面板</p>
+        </div>
+        <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式" style="font-size: 20px;">🌙</button>
+    </div>
+    {% if registration_disabled %}
+        <div class="notice-block">
+            <div class="notice-icon">🔒</div>
+            <div class="notice-title">管理员已关闭注册功能</div>
+            <p>如需注册账号，请联系管理员。</p>
+            <a href="{{ url_for('login') }}" class="btn btn-primary btn-block">返回登录</a>
+        </div>
+    {% else %}
+    <form class="auth-form" method="POST">
+        <div class="form-group">
+            <label for="username">用户名</label>
+            <input type="text" id="username" name="username" required minlength="3" maxlength="32" autocomplete="username" autofocus>
+        </div>
+        <div class="form-group">
+            <label for="password">密码</label>
+            <input type="password" id="password" name="password" required minlength="6" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+            <label for="confirm">确认密码</label>
+            <input type="password" id="confirm" name="confirm" required minlength="6" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">注册</button>
+    </form>
+    <p class="auth-footer">
+        已有账号？<a href="{{ url_for('login') }}">返回登录</a>
+    </p>
+    {% endif %}
+</div>
+<script>
+(function () {
+    var toggle = document.getElementById('darkModeToggle');
+    var STORAGE_KEY = 'mcmonitor_dark_mode';
+
+    function applyDarkMode(isDark) {
+        if (isDark) {
+            document.body.classList.add('dark-mode');
+            toggle.textContent = '☀️';
+            toggle.title = '切换到浅色模式';
+        } else {
+            document.body.classList.remove('dark-mode');
+            toggle.textContent = '🌙';
+            toggle.title = '切换到深色模式';
+        }
+    }
+
+    function init() {
+        var saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === null) {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            applyDarkMode(prefersDark);
+        } else {
+            applyDarkMode(saved === '1');
+        }
+    }
+
+    toggle.addEventListener('click', function () {
+        var isDark = document.body.classList.contains('dark-mode');
+        var newIsDark = !isDark;
+        applyDarkMode(newIsDark);
+        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+    });
+
+    init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body">
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
+            {% if session.is_admin %}
+                <a href="{{ url_for('admin_panel') }}" class="btn btn-sm" style="background:#e44;color:white;">🛡 管理后台</a>
+            {% endif %}
+            <span class="user-tag">{{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline btn-sm">退出</a>
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <section class="stats-row" id="statsRow">
+        <div class="stat-card">
+            <div class="stat-label">服务器总数</div>
+            <div class="stat-value" id="statTotal">{{ servers|length }}</div>
+        </div>
+        <div class="stat-card stat-online">
+            <div class="stat-label">在线</div>
+            <div class="stat-value" id="statOnline">—</div>
+        </div>
+        <div class="stat-card stat-offline">
+            <div class="stat-label">离线</div>
+            <div class="stat-value" id="statOffline">—</div>
+        </div>
+        <div class="stat-card stat-players">
+            <div class="stat-label">玩家总数</div>
+            <div class="stat-value" id="statPlayers">—</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>添加服务器</h2>
+        </div>
+        <form class="add-server-form" method="POST" action="{{ url_for('server_add') }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>名称</label>
+                    <input type="text" name="name" placeholder="如：我的生存服" required maxlength="64">
+                </div>
+                <div class="form-group">
+                    <label>地址 (Host)</label>
+                    <input type="text" name="host" placeholder="如：mc.example.com 或 192.168.1.1" required maxlength="253">
+                </div>
+                <div class="form-group form-group-port">
+                    <label>端口</label>
+                    <input type="number" name="port" value="25565" min="1" max="65535" required>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="show_players" checked>
+                        显示在线玩家名
+                    </label>
+                </div>
+                <div class="form-group form-group-action">
+                    <button type="submit" class="btn btn-primary">+ 添加</button>
+                </div>
+            </div>
+            <p class="hint">
+                ⚠️ 直接使用原生 SLP 协议与 MC 服务器通信，不调用任何第三方 API。
+            </p>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>麦块联机 API Key</h2>
+            <span class="hint">每位用户独立绑定；仅您可使用</span>
+        </div>
+        <form class="add-server-form" method="POST" action="{{ url_for('minekuai_bind_key') }}">
+            <div class="form-row">
+                <div class="form-group" style="flex: 2;">
+                    <label>API Key</label>
+                    <input type="text" name="api_key" placeholder="如：mklive_xxxxxxxxxxxx" autocomplete="off">
+                </div>
+                <div class="form-group form-group-action">
+                    <button type="submit" class="btn btn-primary">💾 保存 / 绑定</button>
+                </div>
+            </div>
+            <p class="hint">留空提交则清除已绑定的密钥。密钥仅保存在本机数据库并通过 HTTPS 以 Authorization: Bearer 方式发送给 minekuai.com。</p>
+        </form>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>测试连接 / 协议诊断</h2>
+            <span class="hint">输入任意 MC Java 服务器地址，查看完整的协议诊断结果</span>
+        </div>
+        <form class="add-server-form" id="testForm" onsubmit="return false;">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>地址 (Host)</label>
+                    <input type="text" id="testHost" placeholder="如：s4.ungc.com.cn" required maxlength="253">
+                </div>
+                <div class="form-group form-group-port">
+                    <label>端口</label>
+                    <input type="number" id="testPort" value="25565" min="1" max="65535" required>
+                </div>
+                <div class="form-group form-group-action">
+                    <button type="button" id="testBtn" class="btn btn-primary">🔍 测试</button>
+                </div>
+            </div>
+        </form>
+        <div id="testResult" class="test-result hidden">
+            <div class="test-result-header">
+                <span id="testStatus" class="server-status">—</span>
+                <span id="testElapsed" class="hint">—</span>
+            </div>
+            <div class="test-info">
+                <div><span class="meta-label">版本：</span><span id="testVersion">—</span></div>
+                <div><span class="meta-label">玩家：</span><span id="testPlayers">—</span></div>
+                <div><span class="meta-label">MOTD：</span><span id="testMotd">—</span></div>
+            </div>
+            <div id="testDiag" class="test-diag"></div>
+            <details id="testRawWrap" class="test-raw">
+                <summary>查看原始 JSON 响应</summary>
+                <pre id="testRaw">—</pre>
+            </details>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>服务器列表</h2>
+            <div class="refresh-box">
+                <span id="lastRefresh">尚未刷新</span>
+                <button id="refreshBtn" class="btn btn-sm btn-primary">🔄 立即刷新</button>
+                <label class="auto-refresh">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    每 30 秒自动刷新
+                </label>
+            </div>
+        </div>
+
+        {% if servers %}
+        <div class="server-grid" id="serverGrid">
+            {% for s in servers %}
+            <div class="server-card" data-server-id="{{ s.id }}"
+                 data-initial-public="{% if s.is_public %}1{% else %}0{% endif %}"
+                 data-initial-show-players="{% if s.show_players %}1{% else %}0{% endif %}">
+                <div class="server-card-header">
+                    <div>
+                        <h3 class="server-name">{{ s.name }}</h3>
+                        <div class="server-host">{{ s.host }}:{{ s.port }}</div>
+                        <div class="server-owner-tag visibility-label">
+                            {% if s.is_public %}公开 · 任何人可在主页看到{% else %}私有 · 仅自己可见{% endif %}
+                        </div>
+                    </div>
+                    <div class="server-status status-loading">检测中…</div>
+                </div>
+                <div class="server-meta">
+                    <div class="meta-item"><span class="meta-label">版本</span><span class="meta-value meta-version">—</span></div>
+                    <div class="meta-item"><span class="meta-label">玩家</span><span class="meta-value meta-players">—</span></div>
+                    <div class="meta-item"><span class="meta-label">延迟</span><span class="meta-value meta-latency">—</span></div>
+                </div>
+                <div class="server-motd">
+                    <span class="meta-label">MOTD / 描述</span>
+                    <div class="motd-content">—</div>
+                </div>
+                <div class="server-players hidden">
+                    <span class="meta-label">在线玩家</span>
+                    <div class="players-list"></div>
+                </div>
+                <div class="server-error hidden"></div>
+
+                <!-- 麦块联机控制区域 -->
+                <div class="minekuai-box">
+                    <div class="minekuai-box-header">
+                        <span class="minekuai-title">⚙ 麦块联机控制</span>
+                        <span class="hint minekuai-status-label" data-minekuai-bound-to="{{ s.minekuai_instance_id or '' }}">
+                            {% if s.minekuai_instance_id %}已绑定实例: {{ s.minekuai_instance_id }}{% else %}尚未绑定实例 ID{% endif %}
+                        </span>
+                    </div>
+
+                    <!-- 实例 ID 绑定表单 -->
+                    <form method="POST"
+                          action="{{ url_for('server_bind_minekuai_instance', server_id=s.id) }}"
+                          class="minekuai-bind-form"
+                          data-server-id="{{ s.id }}">
+                        <div class="minekuai-bind-row">
+                            <label class="meta-label" style="min-width:auto;">实例 ID</label>
+                            <input type="text" name="instance_id"
+                                   value="{{ s.minekuai_instance_id or '' }}"
+                                   placeholder="如：xyz123abc"
+                                   class="input-sm">
+                            <button type="submit" class="btn btn-sm btn-minekuai-save">保存</button>
+                        </div>
+                    </form>
+
+                    <!-- 操作按钮：仅当有绑定实例时才可用 -->
+                    <div class="minekuai-actions">
+                        <button type="button" class="btn btn-sm btn-minekuai-power"
+                                data-action="start"
+                                data-server-id="{{ s.id }}">启动</button>
+                        <button type="button" class="btn btn-sm btn-minekuai-power"
+                                data-action="restart"
+                                data-server-id="{{ s.id }}">重启</button>
+                        <button type="button" class="btn btn-sm btn-minekuai-power"
+                                data-action="stop"
+                                data-server-id="{{ s.id }}">停止</button>
+                        <button type="button" class="btn btn-sm btn-minekuai-power btn-minekuai-danger"
+                                data-action="kill"
+                                data-server-id="{{ s.id }}">强制关闭</button>
+                        <button type="button" class="btn btn-sm btn-minekuai-secondary"
+                                data-action="resources"
+                                data-server-id="{{ s.id }}">资源</button>
+                    </div>
+
+                    <!-- 命令发送 -->
+                    <form class="minekuai-cmd-form" data-server-id="{{ s.id }}" onsubmit="return false;">
+                        <div class="minekuai-bind-row">
+                            <input type="text" name="command" placeholder="发送到服务器控制台，如: help" class="input-sm cmd-input" autocomplete="off">
+                            <button type="submit" class="btn btn-sm btn-primary">执行</button>
+                        </div>
+                    </form>
+
+                    <!-- 响应展示 -->
+                    <pre class="minekuai-output hidden"></pre>
+                </div>
+
+                <div class="server-actions">
+                    <form method="POST"
+                          action="{{ url_for('server_toggle_public', server_id=s.id) }}"
+                          class="public-toggle-form"
+                          data-server-id="{{ s.id }}">
+                        <button type="submit" class="btn btn-sm btn-public-toggle">
+                            {% if s.is_public %}🔓 已公开 · 点击设为私有{% else %}🔒 已私有 · 点击设为公开{% endif %}
+                        </button>
+                    </form>
+                    <form method="POST"
+                          action="{{ url_for('server_toggle_show_players', server_id=s.id) }}"
+                          class="show-players-toggle-form"
+                          data-server-id="{{ s.id }}">
+                        <button type="submit" class="btn btn-sm btn-show-players-toggle">
+                            {% if s.show_players %}👁 显示玩家名中 · 点击隐藏{% else %}🙈 已隐藏玩家名 · 点击显示{% endif %}
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('server_delete', server_id=s.id) }}"
+                          onsubmit="return confirm('确定删除该服务器？');">
+                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>你还没有添加任何服务器，先在上方添加一台吧！</p>
+        </div>
+        {% endif %}
+    </section>
+</main>
+
+<script>
+(function () {
+    const API_STATUS = "{{ url_for('api_status') }}";
+    const API_TEST = "{{ url_for('api_test') }}";
+    const refreshBtn = document.getElementById('refreshBtn');
+    const autoRefreshEl = document.getElementById('autoRefresh');
+    const lastRefreshEl = document.getElementById('lastRefresh');
+    const FRONTEND_TIMEOUT_MS = 18000; // 硬性前端超时：后端 15s + 3s 网络缓冲
+    let autoTimer = null;
+    let currentTestController = null; // 测试按钮用的 AbortController，支持中途取消
+
+    function fmtTime(d) {
+        return d.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function updateCards(data) {
+        document.getElementById('statTotal').textContent = data.total;
+        document.getElementById('statOnline').textContent = data.online;
+        document.getElementById('statOffline').textContent = data.offline;
+        document.getElementById('statPlayers').textContent = data.total_players;
+
+        const byId = {};
+        (data.servers || []).forEach(s => { byId[s.id] = s; });
+
+        document.querySelectorAll('.server-card').forEach(card => {
+            const id = parseInt(card.dataset.serverId, 10);
+            const info = byId[id];
+            if (!info) return;
+
+            // 在线状态
+            const statusEl = card.querySelector('.server-status');
+            const errEl = card.querySelector('.server-error');
+            if (info.online) {
+                statusEl.className = 'server-status status-online';
+                statusEl.textContent = '● 在线';
+                errEl.classList.add('hidden');
+                errEl.textContent = '';
+            } else {
+                statusEl.className = 'server-status status-offline';
+                statusEl.textContent = '● 离线';
+                if (info.error) {
+                    errEl.textContent = '错误: ' + info.error;
+                    errEl.classList.remove('hidden');
+                } else {
+                    errEl.classList.add('hidden');
+                }
+            }
+
+            card.querySelector('.meta-version').textContent = info.version || '—';
+            const playersText = (info.players_online === null || info.players_online === undefined)
+                ? '—'
+                : info.players_online + ' / ' + (info.players_max ?? '?');
+            card.querySelector('.meta-players').textContent = playersText;
+            card.querySelector('.meta-latency').textContent =
+                (info.latency_ms === null || info.latency_ms === undefined) ? '—' : info.latency_ms + ' ms';
+
+            const motd = card.querySelector('.motd-content');
+            motd.textContent = (info.online && info.motd) ? info.motd : '—';
+
+            // 显示/隐藏玩家具体名单
+            const playersBox = card.querySelector('.server-players');
+            const playersList = card.querySelector('.players-list');
+            const showPlayers = !!info.show_players;
+            if (playersBox) {
+                if (showPlayers && info.players_sample && info.players_sample.length) {
+                    playersList.innerHTML = '';
+                    info.players_sample.forEach(p => {
+                        const name = (typeof p === 'string') ? p : (p && p.name ? p.name : '');
+                        if (!name) return;
+                        const item = document.createElement('span');
+                        item.className = 'player-name-tag';
+                        item.textContent = name;
+                        playersList.appendChild(item);
+                    });
+                    playersBox.classList.remove('hidden');
+                } else {
+                    playersList.innerHTML = '';
+                    playersBox.classList.add('hidden');
+                }
+            }
+
+            // 公开/私有状态
+            const isPub = !!info.is_public;
+            card.dataset.initialPublic = isPub ? '1' : '0';
+            const visLabel = card.querySelector('.visibility-label');
+            if (visLabel) {
+                visLabel.textContent = isPub ? '公开 · 任何人可在主页看到' : '私有 · 仅自己可见';
+            }
+            const toggleBtn = card.querySelector('.btn-public-toggle');
+            if (toggleBtn) {
+                toggleBtn.textContent = isPub ? '🔓 已公开 · 点击设为私有' : '🔒 已私有 · 点击设为公开';
+            }
+
+            // 显示/隐藏玩家名 的按钮文案同步
+            card.dataset.initialShowPlayers = showPlayers ? '1' : '0';
+            const showPlayersBtn = card.querySelector('.btn-show-players-toggle');
+            if (showPlayersBtn) {
+                showPlayersBtn.textContent = showPlayers
+                    ? '👁 显示玩家名中 · 点击隐藏'
+                    : '🙈 已隐藏玩家名 · 点击显示';
+            }
+        });
+
+        lastRefreshEl.textContent = '最后刷新：' + fmtTime(new Date());
+    }
+
+    // ---- 公开/私有切换（AJAX） ----
+    document.querySelectorAll('.public-toggle-form').forEach(form => {
+        form.addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            const url = form.action;
+            const btn = form.querySelector('button');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
+            try {
+                const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                // 立即更新卡片，而不用等下一轮刷新
+                const id = parseInt(form.dataset.serverId, 10);
+                const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+                if (card) {
+                    const isPub = !!data.is_public;
+                    card.dataset.initialPublic = isPub ? '1' : '0';
+                    const visLabel = card.querySelector('.visibility-label');
+                    if (visLabel) visLabel.textContent = isPub ? '公开 · 任何人可在主页看到' : '私有 · 仅自己可见';
+                    if (btn) btn.textContent = isPub ? '🔓 已公开 · 点击设为私有' : '🔒 已私有 · 点击设为公开';
+                }
+            } catch (e) {
+                // 失败则回退：走原生表单 POST 重定向
+                if (btn) btn.textContent = '⚠ 失败，重试中…';
+                form.submit();
+                return;
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+    });
+
+    // ---- 显示/隐藏玩家名 切换（AJAX） ----
+    document.querySelectorAll('.show-players-toggle-form').forEach(form => {
+        form.addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            const url = form.action;
+            const btn = form.querySelector('button');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
+            try {
+                const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const id = parseInt(form.dataset.serverId, 10);
+                const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+                if (card) {
+                    const showPlayers = !!data.show_players;
+                    card.dataset.initialShowPlayers = showPlayers ? '1' : '0';
+                    // 若无列表数据或未开启，隐藏
+                    const playersBox = card.querySelector('.server-players');
+                    const playersList = card.querySelector('.players-list');
+                    if (!showPlayers && playersBox) {
+                        playersList.innerHTML = '';
+                        playersBox.classList.add('hidden');
+                    }
+                    if (btn) {
+                        btn.textContent = showPlayers
+                            ? '👁 显示玩家名中 · 点击隐藏'
+                            : '🙈 已隐藏玩家名 · 点击显示';
+                    }
+                }
+            } catch (e) {
+                if (btn) btn.textContent = '⚠ 失败，重试中…';
+                form.submit();
+                return;
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+    });
+
+    // ---- 麦块联机：实例 ID 绑定 / 电源 / 命令 / 资源 ----
+    const API_MINEKUAI_POWER = function (id) { return '/api/minekuai/servers/' + id + '/power'; };
+    const API_MINEKUAI_CMD = function (id) { return '/api/minekuai/servers/' + id + '/command'; };
+    const API_MINEKUAI_RES = function (id) { return '/api/minekuai/servers/' + id + '/resources'; };
+
+    function writeMinekuaiOutput(card, text) {
+        const box = card.querySelector('.minekuai-output');
+        if (!box) return;
+        box.textContent = text;
+        if (text) box.classList.remove('hidden');
+        else box.classList.add('hidden');
+    }
+
+    function appendMinekuaiOutput(card, text) {
+        const box = card.querySelector('.minekuai-output');
+        if (!box) return;
+        box.textContent = (box.textContent ? box.textContent + '\n' : '') + text;
+        box.classList.remove('hidden');
+    }
+
+    // 实例 ID 绑定提交
+    document.querySelectorAll('.minekuai-bind-form').forEach(form => {
+        form.addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            const url = form.action;
+            const input = form.querySelector('input[name="instance_id"]');
+            const btn = form.querySelector('button');
+            const id = parseInt(form.dataset.serverId, 10);
+            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+            const val = (input.value || '').trim();
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
+            try {
+                const body = new FormData();
+                body.append('instance_id', val);
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: body
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const instanceId = data.minekuai_instance_id || '';
+                if (card) {
+                    const label = card.querySelector('.minekuai-status-label');
+                    if (label) {
+                        label.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
+                        label.dataset.minekuaiBoundTo = instanceId;
+                    }
+                    if (input) input.value = instanceId;
+                    appendMinekuaiOutput(card, '[实例绑定] ' + (data.message || '成功'));
+                }
+            } catch (e) {
+                appendMinekuaiOutput(card, '[实例绑定] 失败: ' + e.message);
+                form.submit();
+                return;
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+            }
+        });
+    });
+
+    // 电源 / 资源按钮
+    document.querySelectorAll('.btn-minekuai-power, .btn-minekuai-secondary').forEach(btn => {
+        btn.addEventListener('click', async function () {
+            const action = btn.dataset.action;
+            const id = parseInt(btn.dataset.serverId, 10);
+            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+            if (!card) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = '⏳ …';
+            try {
+                let res;
+                if (action === 'resources') {
+                    res = await fetch(API_MINEKUAI_RES(id), { method: 'GET', headers: { 'Accept': 'application/json' } });
+                } else {
+                    res = await fetch(API_MINEKUAI_POWER(id), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                        body: JSON.stringify({ signal: action })
+                    });
+                }
+                let data;
+                try { data = await res.json(); } catch { data = { raw: res.statusText }; }
+                writeMinekuaiOutput(card,
+                    '[' + action.toUpperCase() + '] HTTP ' + res.status +
+                    (data && data.raw ? ' ' + data.raw : '') +
+                    (res.ok ? '\n✅ 发送成功' : (data && data.errors ? '\n❌ ' + JSON.stringify(data.errors) : '')));
+            } catch (e) {
+                writeMinekuaiOutput(card, '[' + action.toUpperCase() + '] 失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        });
+    });
+
+    // 命令发送
+    document.querySelectorAll('.minekuai-cmd-form').forEach(form => {
+        form.addEventListener('submit', async function (ev) {
+            ev.preventDefault();
+            const id = parseInt(form.dataset.serverId, 10);
+            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+            if (!card) return;
+            const input = form.querySelector('input[name="command"]');
+            const btn = form.querySelector('button');
+            const cmd = (input.value || '').trim();
+            if (!cmd) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = '⏳ 执行中…';
+            try {
+                const res = await fetch(API_MINEKUAI_CMD(id), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ command: cmd })
+                });
+                const data = await res.json();
+                writeMinekuaiOutput(card,
+                    '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
+                    JSON.stringify(data, null, 2));
+                input.value = '';
+            } catch (e) {
+                writeMinekuaiOutput(card, '[COMMAND] 失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        });
+    });
+
+    async function refresh() {
+        if (refreshBtn) {
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⟳ 刷新中…';
+        }
+        try {
+            const res = await fetch(API_STATUS, { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            updateCards(data);
+        } catch (e) {
+            lastRefreshEl.textContent = '刷新失败：' + e.message;
+        } finally {
+            if (refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 立即刷新';
+            }
+        }
+    }
+
+    function setupAuto() {
+        if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+        if (autoRefreshEl && autoRefreshEl.checked) {
+            autoTimer = setInterval(refresh, 30000);
+        }
+    }
+
+    // ---- 测试连接 ----
+    const testBtn = document.getElementById('testBtn');
+    const testHost = document.getElementById('testHost');
+    const testPort = document.getElementById('testPort');
+    const testResult = document.getElementById('testResult');
+    const testStatus = document.getElementById('testStatus');
+    const testElapsed = document.getElementById('testElapsed');
+    const testVersion = document.getElementById('testVersion');
+    const testPlayers = document.getElementById('testPlayers');
+    const testMotd = document.getElementById('testMotd');
+    const testDiag = document.getElementById('testDiag');
+    const testRaw = document.getElementById('testRaw');
+
+    async function runTest() {
+        const host = (testHost.value || '').trim();
+        const portRaw = (testPort.value || '').trim();
+        const port = parseInt(portRaw, 10);
+        if (!host || !port || port <= 0 || port >= 65536) {
+            testStatus.textContent = '请输入有效的主机和端口';
+            testStatus.className = 'server-status status-offline';
+            testResult.classList.remove('hidden');
+            return;
+        }
+
+        // 如果上一次请求还没完成，取消它
+        if (currentTestController) {
+            currentTestController.abort('用户重新点击了测试按钮');
+        }
+        const controller = new AbortController();
+        currentTestController = controller;
+
+        testBtn.disabled = true;
+        testBtn.textContent = '测试中…';
+        testStatus.className = 'server-status status-loading';
+        testStatus.textContent = '● 测试中…';
+        testElapsed.textContent = '';
+        testVersion.textContent = '—';
+        testPlayers.textContent = '—';
+        testMotd.textContent = '—';
+        testDiag.innerHTML = '';
+        testRaw.textContent = '—';
+        testResult.classList.remove('hidden');
+
+        try {
+            const body = new FormData();
+            body.append('host', host);
+            body.append('port', String(port));
+
+            const timerId = setTimeout(() => {
+                controller.abort('前端超时 ' + (FRONTEND_TIMEOUT_MS / 1000) + 's：服务器响应太慢或本机无法连接。');
+            }, FRONTEND_TIMEOUT_MS);
+
+            let info;
+            try {
+                const res = await fetch(API_TEST, {
+                    method: 'POST',
+                    body: body,
+                    cache: 'no-store',
+                    signal: controller.signal,
+                });
+                clearTimeout(timerId);
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                info = await res.json();
+            } catch (fetchErr) {
+                clearTimeout(timerId);
+                if (fetchErr.name === 'AbortError') {
+                    throw new Error(fetchErr.message || '请求超时');
+                }
+                throw fetchErr;
+            }
+
+            if (info.online) {
+                testStatus.className = 'server-status status-online';
+                testStatus.textContent = '● 在线';
+            } else {
+                testStatus.className = 'server-status status-offline';
+                testStatus.textContent = '● 连接失败';
+            }
+            testElapsed.textContent = '耗时 ' + (info.elapsed_ms || 0) + ' ms';
+            testVersion.textContent = info.version || '—';
+            testPlayers.textContent =
+                (info.players_online === null || info.players_online === undefined)
+                    ? '—'
+                    : info.players_online + ' / ' + (info.players_max ?? '?');
+            testMotd.textContent = info.motd || '—';
+
+            const diagBox = document.createElement('div');
+            (info.diagnostics || []).forEach(d => {
+                const line = document.createElement('div');
+                line.textContent = d;
+                diagBox.appendChild(line);
+            });
+            if (info.error) {
+                const line = document.createElement('div');
+                line.className = 'diag-error';
+                line.textContent = '错误: ' + info.error;
+                diagBox.appendChild(line);
+            }
+            testDiag.innerHTML = '';
+            testDiag.appendChild(diagBox);
+
+            testRaw.textContent = JSON.stringify(info.raw_json || info, null, 2);
+        } catch (e) {
+            testStatus.className = 'server-status status-offline';
+            testStatus.textContent = '● ' + e.message;
+        } finally {
+            currentTestController = null;
+            testBtn.disabled = false;
+            testBtn.textContent = '🔍 测试';
+        }
+    }
+
+    if (testBtn) testBtn.addEventListener('click', runTest);
+    if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+    if (autoRefreshEl) autoRefreshEl.addEventListener('change', setupAuto);
+
+    setupAuto();
+    refresh();
+
+    // ---- Dark Mode Toggle ----
+    (function () {
+        const STORAGE_KEY = 'mcmonitor_dark_mode';
+        const toggle = document.getElementById('darkModeToggle');
+
+        function applyDarkMode(isDark) {
+            if (isDark) {
+                document.body.classList.add('dark-mode');
+                toggle.textContent = '☀️';
+                toggle.title = '切换到浅色模式';
+            } else {
+                document.body.classList.remove('dark-mode');
+                toggle.textContent = '🌙';
+                toggle.title = '切换到深色模式';
+            }
+        }
+
+        function init() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved === null) {
+                // Default: follow system preference
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                applyDarkMode(prefersDark);
+            } else {
+                applyDarkMode(saved === '1');
+            }
+        }
+
+        toggle.addEventListener('click', function () {
+            const isDark = document.body.classList.contains('dark-mode');
+            const newIsDark = !isDark;
+            applyDarkMode(newIsDark);
+            localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+        });
+
+        init();
+    })();
+})();
+</script>
+</body>
+</html>

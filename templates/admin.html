@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 · MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body">
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            <span class="user-tag">{{ current_username }} · 管理员</span>
+            <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline">公共主页</a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">我的管理</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">退出</a>
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <section class="hero" style="padding: 12px 0 0 0; text-align: left;">
+        <h2 style="margin-top: 0;">🛡 管理后台</h2>
+        <p class="hero-sub" style="margin-bottom: 12px;">
+            管理员可以查看所有用户 / 服务器，重置密码、升级/降级管理员、删除用户和服务器。
+        </p>
+    </section>
+
+    <section class="settings-row">
+        <div class="setting-card {% if registration_enabled %}card-on{% else %}card-off{% endif %}">
+            <div class="setting-row">
+                <div>
+                    <h3 class="setting-title">📝 用户注册</h3>
+                    <p class="setting-desc">
+                        {% if registration_enabled %}已开启 - 新用户可以通过 /register 注册账号{% else %}已关闭 - 任何人都无法注册，仅管理员可在后台添加用户{% endif %}
+                    </p>
+                </div>
+                <form method="POST" action="{{ url_for('admin_toggle_register') }}">
+                    <button type="submit" class="btn btn-sm {% if registration_enabled %}btn-outline{% else %}btn-primary{% endif %}">
+                        {{ '关闭注册' if registration_enabled else '开启注册' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="setting-card {% if maintenance_enabled %}card-danger{% else %}card-on{% endif %}">
+            <div class="setting-row">
+                <div>
+                    <h3 class="setting-title">🔧 维护模式</h3>
+                    <p class="setting-desc">
+                        {% if maintenance_enabled %}已开启 - 主页显示维护中、普通用户无法登录、无法注册（仅管理员可登录）{% else %}已关闭 - 系统正常运行中{% endif %}
+                    </p>
+                </div>
+                <form method="POST" action="{{ url_for('admin_toggle_maintenance') }}"
+                      onsubmit="return confirm('确定{% if maintenance_enabled %}关闭{% else %}开启{% endif %}维护模式？\n{% if maintenance_enabled %}所有访问将恢复正常{% else %}将导致除管理员外的其他用户被强制退出{% endif %}');">
+                    <button type="submit" class="btn btn-sm {% if maintenance_enabled %}btn-danger{% else %}btn-warning{% endif %}">
+                        {{ '关闭维护' if maintenance_enabled else '开启维护' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">用户总数</div>
+            <div class="stat-value">{{ total_users }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">服务器总数</div>
+            <div class="stat-value">{{ total_servers }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">公开服务器</div>
+            <div class="stat-value">{{ total_public }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">私有服务器</div>
+            <div class="stat-value">{{ total_servers - total_public }}</div>
+        </div>
+    </section>
+
+    <!-- 管理员修改自己密码 -->
+    <section class="card">
+        <h2>🔐 修改自己的密码（防止默认 admin/admin 被访问）</h2>
+        <form method="POST" action="{{ url_for('admin_change_own_password') }}" class="add-server-form">
+            <div class="form-row">
+                <input type="password" name="new_password" placeholder="新密码 (至少 6 位)" required style="flex: 1;">
+                <button type="submit" class="btn btn-primary">更新我的密码</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- 用户列表 -->
+    <section class="card">
+        <h2>👥 用户列表（共 {{ total_users }} 个）</h2>
+        <div class="admin-table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>用户名</th>
+                        <th>角色</th>
+                        <th>服务器数</th>
+                        <th>注册时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.id }}</td>
+                        <td>
+                            <strong>{{ u.username }}</strong>
+                            {% if u.username == 'admin' %}
+                                <span class="badge badge-default">默认管理员</span>
+                            {% elif u.is_admin %}
+                                <span class="badge badge-admin">管理员</span>
+                            {% else %}
+                                <span class="badge badge-user">普通用户</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if u.is_admin %}管理员{% else %}普通用户{% endif %}
+                        </td>
+                        <td>{{ u.server_count }}</td>
+                        <td>{{ u.created_at }}</td>
+                        <td>
+                            <!-- 重置密码 -->
+                            <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form">
+                                <input type="text" name="new_password" placeholder="新密码" size="14" required>
+                                {% if u.username == 'admin' %}
+                                    <input type="hidden" name="confirm_admin" value="1">
+                                {% endif %}
+                                <button type="submit" class="btn btn-sm">重置密码</button>
+                            </form>
+
+                            <!-- 切换管理员身份 (不能操作默认 admin) -->
+                            {% if u.username != 'admin' %}
+                            <form method="POST" action="{{ url_for('admin_toggle_admin', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
+                                <button type="submit" class="btn btn-sm">
+                                    {% if u.is_admin %}降为普通用户{% else %}升级为管理员{% endif %}
+                                </button>
+                            </form>
+                            {% endif %}
+
+                            <!-- 为用户添加服务器 -->
+                            <details style="margin-top: 4px;">
+                                <summary style="cursor: pointer; color: #3b5bdb;">➕ 为该用户添加服务器</summary>
+                                <form method="POST" action="{{ url_for('admin_create_server_for_user', user_id=u.id) }}"
+                                      class="add-server-form" style="padding: 8px 0; gap: 6px;">
+                                    <input type="text" name="name" placeholder="名称" required>
+                                    <input type="text" name="host" placeholder="主机/IP" required>
+                                    <input type="number" name="port" placeholder="端口" min="1" max="65535" value="25565" required>
+                                    <label><input type="checkbox" name="is_public"> 设为公开</label>
+                                    <button type="submit" class="btn btn-primary btn-sm">添加</button>
+                                </form>
+                            </details>
+
+                            <!-- 删除用户 (不能删除 admin 和自己) -->
+                            {% if u.username != 'admin' %}
+                            <form method="POST" action="{{ url_for('admin_delete_user', user_id=u.id) }}"
+                                  class="inline-form" style="margin-top: 4px;"
+                                  onsubmit="return confirm('确定删除用户 {{ u.username }}？将连同其 {{ u.server_count }} 台服务器一起删除');">
+                                <button type="submit" class="btn btn-sm btn-danger">🗑 删除用户</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- 服务器列表 -->
+    <section class="card">
+        <h2>🖥 所有服务器（共 {{ total_servers }} 台）</h2>
+        <div class="admin-table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>名称</th>
+                        <th>所属用户</th>
+                        <th>主机</th>
+                        <th>端口</th>
+                        <th>公开</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in servers %}
+                    <tr>
+                        <td>{{ s.id }}</td>
+                        <td>{{ s.name }}</td>
+                        <td>{{ s.owner_name }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_edit_server', server_id=s.id) }}" class="inline-form">
+                                <input type="text" name="name" value="{{ s.name }}" required size="10">
+                                <input type="text" name="host" value="{{ s.host }}" required size="18">
+                                <input type="number" name="port" value="{{ s.port }}" min="1" max="65535" required size="6">
+                                <button type="submit" class="btn btn-sm">💾</button>
+                            </form>
+                        </td>
+                        <td>{{ s.port }}</td>
+                        <td>
+                            {% if s.is_public %}
+                                <span class="badge badge-admin">公开</span>
+                            {% else %}
+                                <span class="badge badge-user">私有</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ s.created_at }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_toggle_server_public', server_id=s.id) }}" class="inline-form">
+                                <button type="submit" class="btn btn-sm">
+                                    {% if s.is_public %}🔒 设为私有{% else %}🌐 设为公开{% endif %}
+                                </button>
+                            </form>
+                            <form method="POST" action="{{ url_for('admin_delete_server', server_id=s.id) }}"
+                                  class="inline-form" style="margin-top: 4px;"
+                                  onsubmit="return confirm('确定删除该服务器？');">
+                                <button type="submit" class="btn btn-sm btn-danger">🗑 删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+<script>
+(function () {
+    var toggle = document.getElementById('darkModeToggle');
+    var STORAGE_KEY = 'mcmonitor_dark_mode';
+
+    function applyDarkMode(isDark) {
+        if (isDark) {
+            document.body.classList.add('dark-mode');
+            toggle.textContent = '☀️';
+            toggle.title = '切换到浅色模式';
+        } else {
+            document.body.classList.remove('dark-mode');
+            toggle.textContent = '🌙';
+            toggle.title = '切换到深色模式';
+        }
+    }
+
+    function init() {
+        var saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === null) {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            applyDarkMode(prefersDark);
+        } else {
+            applyDarkMode(saved === '1');
+        }
+    }
+
+    toggle.addEventListener('click', function () {
+        var isDark = document.body.classList.contains('dark-mode');
+        var newIsDark = !isDark;
+        applyDarkMode(newIsDark);
+        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+    });
+
+    init();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MC 服务器监控 · 公共主页</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body">
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            {% if logged_in %}
+                {% if session.is_admin %}
+                    <a href="{{ url_for('admin_panel') }}" class="btn btn-sm" style="background:#e44;color:white;">🛡 管理后台</a>
+                {% endif %}
+                <span class="user-tag">{{ current_username }}</span>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">我的管理</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">退出</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn btn-sm btn-primary">登录</a>
+                <a href="{{ url_for('register') }}" class="btn btn-sm btn-outline">注册</a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <section class="hero">
+        <div class="hero-title">🌐 公共 Minecraft 服务器总览</div>
+        <div class="hero-sub">
+            本页显示所有用户选择公开的 MC Java 版服务器，数据由本站直接以原生 SLP 协议与各服务器通信检测，不依赖任何第三方 API。
+        </div>
+    </section>
+
+    <section class="stats-row" id="statsRow">
+        <div class="stat-card">
+            <div class="stat-label">公开服务器总数</div>
+            <div class="stat-value" id="statTotal">{{ servers|length }}</div>
+        </div>
+        <div class="stat-card stat-online">
+            <div class="stat-label">在线</div>
+            <div class="stat-value" id="statOnline">—</div>
+        </div>
+        <div class="stat-card stat-offline">
+            <div class="stat-label">离线</div>
+            <div class="stat-value" id="statOffline">—</div>
+        </div>
+        <div class="stat-card stat-players">
+            <div class="stat-label">在线玩家总数</div>
+            <div class="stat-value" id="statPlayers">—</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>公开服务器列表</h2>
+            <div class="refresh-box">
+                <span id="lastRefresh">尚未刷新</span>
+                <button id="refreshBtn" class="btn btn-sm btn-primary">🔄 立即刷新</button>
+                <label class="auto-refresh">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    每 30 秒自动刷新
+                </label>
+            </div>
+        </div>
+
+        {% if servers %}
+        <div class="server-grid" id="serverGrid">
+            {% for s in servers %}
+            <div class="server-card" data-server-id="{{ s.id }}">
+                <div class="server-card-header">
+                    <div>
+                        <h3 class="server-name">{{ s.name }}</h3>
+                        <div class="server-host">{{ s.host }}:{{ s.port }}</div>
+                        <div class="server-owner-tag">由 {{ s.owner_name }} 公开</div>
+                    </div>
+                    <div class="server-status status-loading">检测中…</div>
+                </div>
+                <div class="server-meta">
+                    <div class="meta-item"><span class="meta-label">版本</span><span class="meta-value meta-version">—</span></div>
+                    <div class="meta-item"><span class="meta-label">玩家</span><span class="meta-value meta-players">—</span></div>
+                    <div class="meta-item"><span class="meta-label">延迟</span><span class="meta-value meta-latency">—</span></div>
+                </div>
+                <div class="server-motd">
+                    <span class="meta-label">MOTD / 描述</span>
+                    <div class="motd-content">—</div>
+                </div>
+                <div class="server-players hidden">
+                    <span class="meta-label">在线玩家</span>
+                    <div class="players-list"></div>
+                </div>
+                <div class="server-error hidden"></div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>目前还没有用户公开的服务器。
+                {% if logged_in %}
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-primary btn-sm">去我的管理页添加</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="btn btn-primary btn-sm">登录</a>
+                    添加你的服务器并选择公开吧！
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
+    </section>
+
+    <footer class="page-footer">
+        <div>
+            ✔ 无需登录即可查看所有公开服务器
+            &nbsp;·&nbsp; ✔ 原生 SLP 协议检测
+            &nbsp;·&nbsp; ✔ 不调用任何第三方 API
+        </div>
+    </footer>
+</main>
+
+<script>
+(function () {
+    const API_STATUS = "{{ url_for('api_public_status') }}";
+    const refreshBtn = document.getElementById('refreshBtn');
+    const autoRefreshEl = document.getElementById('autoRefresh');
+    const lastRefreshEl = document.getElementById('lastRefresh');
+    const FRONTEND_TIMEOUT_MS = 18000;
+    let autoTimer = null;
+
+    function fmtTime(d) { return d.toLocaleString('zh-CN', { hour12: false }); }
+
+    function updateCards(data) {
+        document.getElementById('statTotal').textContent = data.total;
+        document.getElementById('statOnline').textContent = data.online;
+        document.getElementById('statOffline').textContent = data.offline;
+        document.getElementById('statPlayers').textContent = data.total_players;
+
+        const byId = {};
+        (data.servers || []).forEach(s => { byId[s.id] = s; });
+
+        document.querySelectorAll('.server-card').forEach(card => {
+            const id = parseInt(card.dataset.serverId, 10);
+            const info = byId[id];
+            if (!info) return;
+
+            const statusEl = card.querySelector('.server-status');
+            const errEl = card.querySelector('.server-error');
+            if (info.online) {
+                statusEl.className = 'server-status status-online';
+                statusEl.textContent = '● 在线';
+                errEl.classList.add('hidden');
+                errEl.textContent = '';
+            } else {
+                statusEl.className = 'server-status status-offline';
+                statusEl.textContent = '● 离线';
+                if (info.error) {
+                    errEl.textContent = '错误: ' + info.error;
+                    errEl.classList.remove('hidden');
+                } else {
+                    errEl.classList.add('hidden');
+                }
+            }
+
+            card.querySelector('.meta-version').textContent = info.version || '—';
+            const playersText = (info.players_online === null || info.players_online === undefined)
+                ? '—'
+                : info.players_online + ' / ' + (info.players_max ?? '?');
+            card.querySelector('.meta-players').textContent = playersText;
+            card.querySelector('.meta-latency').textContent =
+                (info.latency_ms === null || info.latency_ms === undefined) ? '—' : info.latency_ms + ' ms';
+
+            const motd = card.querySelector('.motd-content');
+            motd.textContent = (info.online && info.motd) ? info.motd : '—';
+
+            // 玩家具体名单 - 仅当服务端返回 show_players=true 且有 players_sample 时显示
+            const playersBox = card.querySelector('.server-players');
+            const playersList = card.querySelector('.players-list');
+            if (playersBox) {
+                if (info.show_players && info.players_sample && info.players_sample.length) {
+                    playersList.innerHTML = '';
+                    info.players_sample.forEach(p => {
+                        const name = (typeof p === 'string') ? p : (p && p.name ? p.name : '');
+                        if (!name) return;
+                        const item = document.createElement('span');
+                        item.className = 'player-name-tag';
+                        item.textContent = name;
+                        playersList.appendChild(item);
+                    });
+                    playersBox.classList.remove('hidden');
+                } else {
+                    playersList.innerHTML = '';
+                    playersBox.classList.add('hidden');
+                }
+            }
+        });
+
+        lastRefreshEl.textContent = '最后刷新：' + fmtTime(new Date());
+    }
+
+    async function refresh() {
+        if (refreshBtn) {
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⟳ 刷新中…';
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort('刷新超时'), FRONTEND_TIMEOUT_MS);
+        try {
+            const res = await fetch(API_STATUS, { cache: 'no-store', signal: controller.signal });
+            clearTimeout(timer);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            updateCards(data);
+        } catch (e) {
+            lastRefreshEl.textContent = '刷新失败：' + e.message;
+        } finally {
+            if (refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 立即刷新';
+            }
+        }
+    }
+
+    function setupAuto() {
+        if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+        if (autoRefreshEl && autoRefreshEl.checked) {
+            autoTimer = setInterval(refresh, 30000);
+        }
+    }
+
+    if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+    if (autoRefreshEl) autoRefreshEl.addEventListener('change', setupAuto);
+
+    setupAuto();
+    // 如果有服务器，页面加载后立即刷新一次；否则不请求 API
+    {% if servers %}
+    refresh();
+    {% endif %}
+
+    // ---- Dark Mode Toggle ----
+    (function () {
+        var toggle = document.getElementById('darkModeToggle');
+        var STORAGE_KEY = 'mcmonitor_dark_mode';
+
+        function applyDarkMode(isDark) {
+            if (isDark) {
+                document.body.classList.add('dark-mode');
+                toggle.textContent = '☀️';
+                toggle.title = '切换到浅色模式';
+            } else {
+                document.body.classList.remove('dark-mode');
+                toggle.textContent = '🌙';
+                toggle.title = '切换到深色模式';
+            }
+        }
+
+        function init() {
+            var saved = localStorage.getItem(STORAGE_KEY);
+            if (saved === null) {
+                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                applyDarkMode(prefersDark);
+            } else {
+                applyDarkMode(saved === '1');
+            }
+        }
+
+        toggle.addEventListener('click', function () {
+            var isDark = document.body.classList.contains('dark-mode');
+            var newIsDark = !isDark;
+            applyDarkMode(newIsDark);
+            localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+        });
+
+        init();
+    })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统维护中 - MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-body">
+<button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式" style="position: fixed; top: 16px; right: 16px; font-size: 20px; z-index: 100;">🌙</button>
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+<div class="auth-card" style="max-width: 460px;">
+    <div class="auth-header" style="text-align:center;">
+        <div style="font-size: 54px; margin-bottom: 12px;">🛠</div>
+        <h1>系统维护中</h1>
+        <p class="auth-sub">服务正在升级维护中，请稍后再试</p>
+    </div>
+    <div class="notice-block" style="text-align:center;">
+        <p>当前系统开启了维护模式：</p>
+        <ul style="text-align:left; color:#6b7280; margin:12px auto; padding-left:18px; line-height:1.9;">
+            <li>⚠ 访问公共主页会看到本页面</li>
+            <li>⚠ 无法注册新账号</li>
+            <li>⚠ 普通账号无法登录</li>
+            <li>✓ <strong>管理员账号</strong>可正常登录管理后台</li>
+        </ul>
+        <p style="margin-top:12px; color:#374151;">如有疑问，请联系管理员。</p>
+        <div style="margin-top:16px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+            <a href="{{ url_for('login') }}" class="btn btn-primary">管理员登录</a>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var toggle = document.getElementById('darkModeToggle');
+    var STORAGE_KEY = 'mcmonitor_dark_mode';
+
+    function applyDarkMode(isDark) {
+        if (isDark) {
+            document.body.classList.add('dark-mode');
+            toggle.textContent = '☀️';
+            toggle.title = '切换到浅色模式';
+        } else {
+            document.body.classList.remove('dark-mode');
+            toggle.textContent = '🌙';
+            toggle.title = '切换到深色模式';
+        }
+    }
+
+    function init() {
+        var saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === null) {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            applyDarkMode(prefersDark);
+        } else {
+            applyDarkMode(saved === '1');
+        }
+    }
+
+    toggle.addEventListener('click', function () {
+        var isDark = document.body.classList.contains('dark-mode');
+        var newIsDark = !isDark;
+        applyDarkMode(newIsDark);
+        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+    });
+
+    init();
+})();
+</script>
+</body>
+</html>
