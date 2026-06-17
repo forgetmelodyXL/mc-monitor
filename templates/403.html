@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - 无权访问</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;">
+    <div style="text-align: center;">
+        <div style="font-size: 80px; margin-bottom: 16px;">🔒</div>
+        <h1 style="color: #2a2e5b; margin-bottom: 12px;">403</h1>
+        <p style="color: #8a8fa6; font-size: 16px; margin-bottom: 24px;">您没有权限访问此页面</p>
+        <a href="{{ url_for('index') }}" style="color: #6c8dff; text-decoration: none; font-size: 14px;">← 返回首页</a>
+    </div>
+</body>
+</html>

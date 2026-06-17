@@ -7,6 +7,7 @@ import sqlite3
 import secrets
 import hashlib
 import time
+import logging
 import concurrent.futures
 from datetime import datetime, timedelta
 from functools import wraps
@@ -40,7 +41,7 @@ for _p in _candidate_site_pkgs:
 try:
     from flask import (
         Flask, render_template, request, redirect, url_for,
-        session, flash, jsonify, g, abort
+        session, flash, jsonify, g, abort, send_file
     )
 except ImportError:
     print("=" * 60)
@@ -80,7 +81,7 @@ app = Flask(
     template_folder=TEMPLATE_DIR,
     static_folder=STATIC_DIR,
 )
-app.config["SECRET_KEY"] = secrets.token_hex(32)
+app.config["SECRET_KEY"] = "mc-monitor-server-secret-key-change-in-production-2024"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
@@ -105,6 +106,135 @@ def close_db(_exc):
         db.close()
 
 
+# ============================================================
+# 数据库迁移系统
+# ============================================================
+_SCHEMA_VERSION = 5  # 当前代码库对应的 schema 版本
+
+
+def _get_schema_version(conn):
+    """读取当前数据库的 schema 版本，不存在则返回 0"""
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'schema_version'").fetchone()
+        return int(row["value"]) if row else 0
+    except (sqlite3.OperationalError, ValueError, TypeError):
+        return 0
+
+
+def _set_schema_version(conn, version):
+    """写入 schema 版本"""
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', ?, ?)"
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(version), datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+    )
+
+
+def _run_migrations(conn):
+    """
+    按顺序执行未应用的数据库迁移，直到达到 _SCHEMA_VERSION。
+    每个迁移是 (version, description, sql_statements_list) 格式。
+    """
+    current = _get_schema_version(conn)
+    if current >= _SCHEMA_VERSION:
+        return  # 已是最新的
+
+    migrations = [
+        # v1: 初始完整 schema（users, servers, status_logs, settings, alerts）
+        (1, "init_schema", [
+            """CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                minekuai_api_key TEXT,
+                created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS servers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 25565,
+                is_public INTEGER NOT NULL DEFAULT 0,
+                show_players INTEGER NOT NULL DEFAULT 1,
+                minekuai_instance_id TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS status_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL,
+                online INTEGER NOT NULL,
+                players_online INTEGER,
+                players_max INTEGER,
+                version TEXT,
+                motd TEXT,
+                latency_ms INTEGER,
+                checked_at TEXT NOT NULL,
+                FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+            )""",
+            """CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                acknowledged INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+        ]),
+        # v2: servers.is_public 列（历史遗留迁移）
+        (2, "add_servers_is_public", [
+            "ALTER TABLE servers ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0",
+        ]),
+        # v3: servers.show_players 列
+        (3, "add_servers_show_players", [
+            "ALTER TABLE servers ADD COLUMN show_players INTEGER NOT NULL DEFAULT 1",
+        ]),
+        # v4: users.is_admin, users.minekuai_api_key 列
+        (4, "add_users_admin_and_minekuai", [
+            "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN minekuai_api_key TEXT",
+        ]),
+        # v5: servers.group_id + server_groups 表 + servers.protocol
+        (5, "add_server_groups_and_protocol", [
+            """CREATE TABLE IF NOT EXISTS server_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_servers_group ON servers(user_id, group_id)",
+            "ALTER TABLE servers ADD COLUMN group_id INTEGER",
+            "ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'java'",
+        ]),
+    ]
+
+    for version, desc, statements in migrations:
+        if version <= current:
+            continue
+        logging.info(f"[Migration] 应用 v{version}: {desc}")
+        for stmt in statements:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                # 列/表已存在等错误不影响迁移继续
+                logging.info(f"[Migration] v{version} SQL 跳过 (可能已存在): {e}")
+        _set_schema_version(conn, version)
+        conn.commit()
+        logging.info(f"[Migration] v{version} 完成")
+
+
 def init_db():
     # ── 启动检测：确保 requests 已安装（麦块联机 API 依赖）────────────
     try:
@@ -126,6 +256,10 @@ def init_db():
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+
+    # ── 运行数据库迁移 ────────────────────────────────────────────────
+    _run_migrations(conn)
+    # ─────────────────────────────────────────────────────────────────
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,15 +272,27 @@ def init_db():
     CREATE TABLE IF NOT EXISTS servers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
+        group_id INTEGER,
         name TEXT NOT NULL,
         host TEXT NOT NULL,
         port INTEGER NOT NULL DEFAULT 25565,
+        protocol TEXT NOT NULL DEFAULT 'java',
         is_public INTEGER NOT NULL DEFAULT 0,
         show_players INTEGER NOT NULL DEFAULT 1,
         minekuai_instance_id TEXT,
         created_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(group_id) REFERENCES server_groups(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS server_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_servers_group ON servers(user_id, group_id);
     CREATE TABLE IF NOT EXISTS status_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         server_id INTEGER NOT NULL,
@@ -165,6 +311,18 @@ def init_db():
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        acknowledged INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_alerts_user_ack ON alerts(user_id, acknowledged, created_at DESC);
     """)
     # 迁移：老数据库补列
     try:
@@ -187,9 +345,23 @@ def init_db():
         conn.execute("ALTER TABLE servers ADD COLUMN minekuai_instance_id TEXT")
     except sqlite3.OperationalError:
         pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE servers ADD COLUMN group_id INTEGER REFERENCES server_groups(id)")
+    except sqlite3.OperationalError:
+        pass  # 列已存在或表不存在（稍后重建）
+    try:
+        conn.execute("ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'java'")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
     # 默认开关值
     now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
-    for default_key, default_value in (("registration_enabled", "1"), ("maintenance_enabled", "0")):
+    default_settings = [
+        ("registration_enabled", "1"),
+        ("maintenance_enabled", "0"),
+        ("cleanup_logs_days", "30"),
+        ("cleanup_alerts_days", "7"),
+    ]
+    for default_key, default_value in default_settings:
         existing = conn.execute("SELECT 1 FROM settings WHERE key = ?", (default_key,)).fetchone()
         if not existing:
             conn.execute(
@@ -229,6 +401,98 @@ def verify_password(password: str, stored: str) -> bool:
         return secrets.compare_digest(computed, digest)
     except Exception:
         return False
+
+
+# ============================================================
+# CSRF 保护
+# ============================================================
+CSRF_TOKEN_NAME = "_csrf_token"
+
+
+def generate_csrf_token():
+    """生成一个安全的 CSRF token 并存入 session"""
+    token = secrets.token_hex(32)
+    session[CSRF_TOKEN_NAME] = token
+    return token
+
+
+def validate_csrf_token():
+    """验证请求中的 CSRF token，验证通过返回 True"""
+    form_token = request.form.get(CSRF_TOKEN_NAME) or ""
+    session_token = session.get(CSRF_TOKEN_NAME, "")  # 修复：使用一致的 key
+    # 请求头中也可以传 X-CSRF-Token
+    header_token = request.headers.get("X-CSRF-Token", "")
+    token = form_token if form_token else header_token
+    if not token or not session_token:
+        return False
+    result = secrets.compare_digest(token, session_token)
+    # 验证后刷新 token（一次性）
+    session[CSRF_TOKEN_NAME] = secrets.token_hex(32)
+    return result
+
+
+def csrf_protect(view):
+    """装饰器：保护所有 POST/PUT/DELETE 请求免受 CSRF 攻击"""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return view(*args, **kwargs)
+        if not validate_csrf_token():
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+# 预先为模板生成 token（登录页等无需登录的页面也可用）
+@app.before_request
+def ensure_csrf_token():
+    # 为所有请求生成/更新 session 中的 CSRF token，供模板使用
+    session.permanent = True
+    if CSRF_TOKEN_NAME not in session:
+        session[CSRF_TOKEN_NAME] = secrets.token_hex(32)
+
+    # 非 GET 请求验证 CSRF（API 路由跳过，由各自业务逻辑处理）
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    # API 路由跳过（使用 session cookie 认证，fetch 请求会携带 cookie）
+    if request.path.startswith("/api/"):
+        return
+    # 登录/注册 API 跳过（麦块 API 代理跳过）
+    if request.path.startswith("/minekuai/"):
+        return
+    if not validate_csrf_token():
+        abort(403)
+
+
+# ============================================================
+# 错误页面 & Favicon
+# ============================================================
+@app.route("/favicon.ico")
+def favicon():
+    """返回站点 favicon（内联 SVG pickaxe 图标）"""
+    import io
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        '<rect width="64" height="64" rx="12" fill="#1a1d2e"/>'
+        '<text x="32" y="46" font-size="36" text-anchor="middle" fill="#6c8dff">&#x26CF;</text>'
+        '</svg>'
+    ).encode("utf-8")
+    return send_file(io.BytesIO(svg), mimetype="image/svg+xml")
+
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template("404.html"), 404
+
+
+@app.errorhandler(403)
+def forbidden(e):
+    return render_template("403.html"), 403
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return render_template("500.html"), 500
 
 
 def login_required(view):
@@ -640,6 +904,49 @@ def ping_with_timeout(host: str, port: int, overall_timeout: float = 15.0, step_
             }
 
 
+def _ping_bedrock_with_diagnostics(host: str, port: int, timeout_per_step: float = 5.0):
+    """底层 Bedrock ping，带诊断日志。"""
+    diagnostics = []
+    t0 = time.perf_counter()
+    try:
+        info = ping_bedrock_server(host, port, timeout=timeout_per_step)
+        diagnostics.append(f"[Bedrock] 成功: 延迟={info.get('latency_ms')}ms")
+        return {
+            **info,
+            "diagnostics": diagnostics,
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        }
+    except Exception as e:
+        return {
+            "online": False,
+            "error": str(e),
+            "diagnostics": diagnostics + [f"[Bedrock] 错误: {type(e).__name__}: {e}"],
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        }
+
+
+def ping_with_timeout_bedrock(host: str, port: int, overall_timeout: float = 15.0, step_timeout: float = 5.0):
+    """Bedrock ping with overall timeout protection."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_ping_bedrock_with_diagnostics, host, int(port), step_timeout)
+        try:
+            return future.result(timeout=overall_timeout)
+        except concurrent.futures.TimeoutError:
+            return {
+                "online": False,
+                "error": f"整体超时 ({overall_timeout}s)",
+                "diagnostics": [f"[超时] Bedrock ping 在 {overall_timeout}s 内未完成"],
+                "elapsed_ms": int(overall_timeout * 1000),
+            }
+        except Exception as e:
+            return {
+                "online": False,
+                "error": str(e),
+                "diagnostics": [f"[内部错误] {type(e).__name__}: {e}"],
+                "elapsed_ms": int(overall_timeout * 1000),
+            }
+
+
 def ping_with_latency(host: str, port: int, timeout: float = 5.0):
     """给 /api/status 用的简洁版（不带冗长诊断）。"""
     result = ping_with_timeout(host, port, overall_timeout=15.0, step_timeout=timeout)
@@ -654,6 +961,197 @@ def ping_with_latency(host: str, port: int, timeout: float = 5.0):
         "players_sample": result.get("players_sample"),
         "motd": result.get("motd") or "",
     }
+
+
+def ping_server(host: str, port: int, protocol: str = "java", timeout: float = 5.0):
+    """
+    统一的服务器检测接口，根据 protocol 分派到对应协议检测函数。
+    protocol: 'java' | 'bedrock' | 'http' | 'tcp'
+    """
+    if protocol == "bedrock":
+        try:
+            return ping_bedrock_server(host, port, timeout=timeout)
+        except Exception as e:
+            return {"online": False, "error": str(e), "latency_ms": 0,
+                    "version": "", "players_online": None, "players_max": None,
+                    "players_sample": None, "motd": "", "protocol": "bedrock"}
+    elif protocol == "http":
+        try:
+            return ping_http_server(host, timeout=timeout)
+        except Exception as e:
+            return {"online": False, "error": str(e), "latency_ms": 0,
+                    "version": "", "players_online": None, "players_max": None,
+                    "players_sample": None, "motd": "", "protocol": "http"}
+    elif protocol == "tcp":
+        try:
+            return ping_tcp_server(host, port, timeout=timeout)
+        except Exception as e:
+            return {"online": False, "error": str(e), "latency_ms": 0,
+                    "version": "", "players_online": None, "players_max": None,
+                    "players_sample": None, "motd": "", "protocol": "tcp"}
+    else:
+        # java (default)
+        return ping_with_latency(host, port, timeout=timeout)
+
+
+# ============================================================
+# Bedrock (Minecraft PE / Nintendo Switch) 协议
+# Raknet Ping 参考: https://wiki.vg/Raknet_Protocol
+# ============================================================
+def ping_bedrock_server(host: str, port: int, timeout: float = 5.0):
+    """
+    通过 Raknet 协议获取 Bedrock 服务器状态。
+    timeout: 连接超时（秒）。
+    """
+    import struct
+
+    host = host.strip()
+    port = int(port)
+    raknet_ping_id = b"\x01\x00"  # ID 0x01 = Unconnected Ping
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        sock.sendto(raknet_ping_id + struct.pack(">Q", int(time.time() * 1000)), (host, port))
+        sock.settimeout(timeout)
+        data, _ = sock.recvfrom(65535)
+        sock.close()
+    except socket.timeout:
+        raise ConnectionError(f"连接 {host}:{port} 超时 ({timeout}s)")
+    except OSError as e:
+        raise ConnectionError(f"无法连接到 {host}:{port}: {e}")
+
+    if not data:
+        raise ConnectionError("服务器未返回任何数据")
+
+    # Raknet 响应格式：0x1c (Unconnected Pong) + 8字节 ping ID + 64字节 server ID + ...
+    if data[0:1] != b"\x1c":
+        raise ConnectionError(f"无效的 Raknet 响应 (首字节: {data[0]!r})")
+
+    try:
+        # 跳过 0x1c(1) + ping_id(8) + server_id(8) = 17 字节，之后是 motd 等
+        # 安全读取
+        body = data[17:]
+        # 前 4 字节是大端序整数，表示字符串段数量
+        if len(body) < 4:
+            raise ConnectionError("Raknet 响应体太短")
+        str_count = struct.unpack(">I", body[:4])[0]
+        # 解析字符串列表: [edition, motd, protocol, version, online, max, nat?]
+        offset = 4
+        strings = []
+        for _ in range(str_count):
+            if offset + 2 > len(body):
+                break
+            str_len = struct.unpack(">H", body[offset:offset + 2])[0]
+            offset += 2
+            if offset + str_len > len(body):
+                break
+            s = body[offset:offset + str_len].decode("utf-8", errors="replace")
+            strings.append(s)
+            offset += str_len
+
+        motd = strings[1] if len(strings) > 1 else ""
+        protocol = strings[2] if len(strings) > 2 else ""
+        version = strings[3] if len(strings) > 3 else ""
+        players_online_str = strings[4] if len(strings) > 4 else "0"
+        players_max_str = strings[5] if len(strings) > 5 else "0"
+
+        try:
+            players_online = int(players_online_str)
+        except (ValueError, TypeError):
+            players_online = 0
+        try:
+            players_max = int(players_max_str)
+        except (ValueError, TypeError):
+            players_max = 0
+
+        return {
+            "online": True,
+            "version": f"Bedrock {version}",
+            "players_online": players_online,
+            "players_max": players_max,
+            "players_sample": None,
+            "motd": motd.strip(),
+            "protocol": "bedrock",
+        }
+    except Exception as e:
+        raise ConnectionError(f"Bedrock 数据解析失败: {e}")
+
+
+# ============================================================
+# HTTP(S) 健康检查
+# ============================================================
+def ping_http_server(url: str, timeout: float = 5.0):
+    """
+    对任意 URL 进行 HTTP HEAD/GET 健康检查。
+    返回在线状态（2xx=在线）、响应时间。
+    """
+    _requests_mod = None
+    try:
+        import requests as _req
+        _requests_mod = _req
+    except ImportError:
+        pass
+
+    if not _requests_mod:
+        raise ConnectionError("requests 模块未安装，无法进行 HTTP 健康检查")
+
+    url = url.strip()
+    if not url.startswith("http"):
+        url = "http://" + url
+
+    try:
+        t0 = time.perf_counter()
+        resp = _requests_mod.get(url, timeout=timeout, allow_redirects=True,
+                                  headers={"User-Agent": "MC-Monitor/1.0"})
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        online = 200 <= resp.status_code < 400
+        return {
+            "online": online,
+            "version": f"HTTP {resp.status_code}",
+            "players_online": None,
+            "players_max": None,
+            "players_sample": None,
+            "motd": f"{resp.status_code} {resp.reason}",
+            "protocol": "http",
+            "latency_ms": elapsed_ms,
+        }
+    except _requests_mod.Timeout:
+        raise ConnectionError(f"HTTP 请求超时 ({timeout}s)")
+    except Exception as e:
+        raise ConnectionError(f"HTTP 检查失败: {e}")
+
+
+# ============================================================
+# 通用 TCP Ping（仅检测端口是否开放）
+# ============================================================
+def ping_tcp_server(host: str, port: int, timeout: float = 3.0):
+    """
+    通用 TCP 端口检测：仅检测端口是否开放，不解析任何协议。
+    """
+    host = host.strip()
+    port = int(port)
+    try:
+        t0 = time.perf_counter()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        sock.close()
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        return {
+            "online": True,
+            "version": f"TCP:{port}",
+            "players_online": None,
+            "players_max": None,
+            "players_sample": None,
+            "motd": f"端口 {port} 开放",
+            "protocol": "tcp",
+            "latency_ms": elapsed_ms,
+        }
+    except socket.timeout:
+        raise ConnectionError(f"TCP 连接超时 ({timeout}s)")
+    except OSError as e:
+        raise ConnectionError(f"TCP 连接失败: {e}")
 
 
 # ============================================================
@@ -720,6 +1218,12 @@ def register():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "POST":
+        # POST 请求应用登录速率限制
+        allowed, remaining, retry = _check_rate_limit("login", _get_client_ip())
+        if not allowed:
+            flash(f"登录请求过于频繁，请 {retry} 秒后重试", "error")
+            return render_template("login.html", username=(request.form.get("username") or ""))
     in_maintenance = get_setting("maintenance_enabled", "0") == "1"
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
@@ -779,6 +1283,17 @@ def admin_panel():
     # 当前开关状态
     reg_enabled = get_setting("registration_enabled", "1") == "1"
     maint_enabled = get_setting("maintenance_enabled", "0") == "1"
+    cleanup_logs_days = get_setting("cleanup_logs_days", "30")
+    cleanup_alerts_days = get_setting("cleanup_alerts_days", "7")
+    # 统计当前数据量
+    count_row = db.execute(
+        """SELECT
+           (SELECT COUNT(*) FROM status_logs) AS logs_count,
+           (SELECT COUNT(*) FROM alerts) AS alerts_count
+           """
+    ).fetchone()
+    status_logs_count = count_row["logs_count"] if count_row else 0
+    alerts_count = count_row["alerts_count"] if count_row else 0
     return render_template("admin.html",
                            users=users, servers=servers,
                            total_users=total_users,
@@ -786,6 +1301,10 @@ def admin_panel():
                            total_public=total_public,
                            registration_enabled=reg_enabled,
                            maintenance_enabled=maint_enabled,
+                           cleanup_logs_days=cleanup_logs_days,
+                           cleanup_alerts_days=cleanup_alerts_days,
+                           status_logs_count=status_logs_count,
+                           alerts_count=alerts_count,
                            current_username=session.get("username", ""))
 
 
@@ -814,6 +1333,49 @@ def admin_toggle_maintenance():
     # 开启维护模式后，若当前会话不是管理员就自动踢出
     if new_val == "1" and not session.get("is_admin"):
         session.clear()
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/settings/cleanup-logs", methods=["POST"])
+@admin_required
+def admin_update_cleanup_logs():
+    """更新状态历史保留天数"""
+    days_str = (request.form.get("days") or "").strip()
+    try:
+        days = int(days_str)
+        if days < 1 or days > 365:
+            raise ValueError()
+    except ValueError:
+        flash("保留天数无效（请输入 1-365 之间的整数）", "error")
+        return redirect(url_for("admin_panel"))
+    set_setting("cleanup_logs_days", str(days))
+    flash(f"状态历史保留天数已更新为 {days} 天", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/settings/cleanup-alerts", methods=["POST"])
+@admin_required
+def admin_update_cleanup_alerts():
+    """更新告警历史保留天数"""
+    days_str = (request.form.get("days") or "").strip()
+    try:
+        days = int(days_str)
+        if days < 1 or days > 365:
+            raise ValueError()
+    except ValueError:
+        flash("保留天数无效（请输入 1-365 之间的整数）", "error")
+        return redirect(url_for("admin_panel"))
+    set_setting("cleanup_alerts_days", str(days))
+    flash(f"告警保留天数已更新为 {days} 天", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/settings/run-cleanup", methods=["POST"])
+@admin_required
+def admin_run_cleanup():
+    """手动执行一次数据清理"""
+    _cleanup_old_data()
+    flash("已手动触发一次数据清理，详情请查看控制台日志", "success")
     return redirect(url_for("admin_panel"))
 
 
@@ -982,21 +1544,36 @@ def admin_change_own_password():
 def dashboard():
     db = get_db()
     servers = db.execute(
-        "SELECT * FROM servers WHERE user_id = ? ORDER BY id ASC",
+        "SELECT * FROM servers WHERE user_id = ? ORDER BY CASE WHEN group_id IS NULL THEN 0 ELSE 1 END, group_id ASC, id ASC",
+        (session["user_id"],),
+    ).fetchall()
+    groups = db.execute(
+        "SELECT * FROM server_groups WHERE user_id = ? ORDER BY sort_order ASC, id ASC",
         (session["user_id"],),
     ).fetchall()
     return render_template("dashboard.html",
                            servers=servers,
+                           groups=groups,
                            username=session.get("username", ""))
 
 
 @app.route("/server/add", methods=["POST"])
 @login_required
 def server_add():
+    # 速率限制（每个用户每分钟 5 次）
+    if session.get("user_id"):
+        allowed, remaining, retry = _check_rate_limit("server_add", f"u{session['user_id']}")
+        if not allowed:
+            flash(f"添加服务器过于频繁，请 {retry} 秒后重试", "error")
+            return redirect(url_for("dashboard"))
     name = (request.form.get("name") or "").strip()
     host = (request.form.get("host") or "").strip()
     port_str = (request.form.get("port") or "").strip() or "25565"
     show_players = 1 if request.form.get("show_players") else 0
+    group_id_str = (request.form.get("group_id") or "").strip()
+    protocol = (request.form.get("protocol") or "java").strip().lower()
+    if protocol not in ("java", "bedrock", "http", "tcp"):
+        protocol = "java"
     try:
         port = int(port_str)
         if port < 1 or port > 65535:
@@ -1010,13 +1587,29 @@ def server_add():
         return redirect(url_for("dashboard"))
 
     db = get_db()
+    # 验证 group_id 归属当前用户
+    group_id = None
+    if group_id_str:
+        try:
+            gid = int(group_id_str)
+            grp = db.execute(
+                "SELECT id FROM server_groups WHERE id = ? AND user_id = ?",
+                (gid, session["user_id"]),
+            ).fetchone()
+            if grp:
+                group_id = gid
+        except ValueError:
+            pass
+
     db.execute(
-        "INSERT INTO servers (user_id, name, host, port, is_public, show_players, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+        "INSERT INTO servers (user_id, group_id, name, host, port, protocol, is_public, show_players, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
         (
             session["user_id"],
+            group_id,
             name[:64],
             host[:253],
             port,
+            protocol,
             show_players,
             datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
         ),
@@ -1088,8 +1681,151 @@ def server_toggle_show_players(server_id):
     return redirect(url_for("dashboard"))
 
 
+# ============================================================
+# 服务器分组
+# ============================================================
+@app.route("/group/add", methods=["POST"])
+@login_required
+def group_add():
+    """创建新分组"""
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("分组名称不能为空", "error")
+        return redirect(url_for("dashboard"))
+    if len(name) > 32:
+        flash("分组名称不能超过 32 个字符", "error")
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    # 取最大 sort_order
+    max_order = db.execute(
+        "SELECT MAX(sort_order) FROM server_groups WHERE user_id = ?",
+        (session["user_id"],)
+    ).fetchone()[0] or 0
+    db.execute(
+        "INSERT INTO server_groups (user_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
+        (session["user_id"], name[:32], max_order + 1,
+         datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+    )
+    db.commit()
+    flash(f"已创建分组：{name}", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/group/<int:group_id>/rename", methods=["POST"])
+@login_required
+def group_rename(group_id):
+    """重命名分组"""
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("分组名称不能为空", "error")
+        return redirect(url_for("dashboard"))
+    if len(name) > 32:
+        flash("分组名称不能超过 32 个字符", "error")
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    grp = db.execute(
+        "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
+        (group_id, session["user_id"]),
+    ).fetchone()
+    if not grp:
+        abort(404)
+    db.execute(
+        "UPDATE server_groups SET name = ? WHERE id = ?",
+        (name[:32], group_id),
+    )
+    db.commit()
+    flash(f"分组已重命名为：{name}", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/group/<int:group_id>/delete", methods=["POST"])
+@login_required
+def group_delete(group_id):
+    """删除分组（组内服务器移至未分组）"""
+    db = get_db()
+    grp = db.execute(
+        "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
+        (group_id, session["user_id"]),
+    ).fetchone()
+    if not grp:
+        abort(404)
+    db.execute(
+        "UPDATE servers SET group_id = NULL WHERE group_id = ?",
+        (group_id,),
+    )
+    db.execute("DELETE FROM server_groups WHERE id = ?", (group_id,))
+    db.commit()
+    flash(f"分组 {grp['name']} 已删除（服务器已移至未分组）", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/group/<int:group_id>/set-order", methods=["POST"])
+@login_required
+def group_set_order(group_id):
+    """更新分组顺序"""
+    order_str = (request.form.get("sort_order") or "").strip()
+    try:
+        order = int(order_str)
+    except ValueError:
+        flash("顺序值无效", "error")
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    grp = db.execute(
+        "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
+        (group_id, session["user_id"]),
+    ).fetchone()
+    if not grp:
+        abort(404)
+    db.execute(
+        "UPDATE server_groups SET sort_order = ? WHERE id = ?",
+        (order, group_id),
+    )
+    db.commit()
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/server/<int:server_id>/set-group", methods=["POST"])
+@login_required
+def server_set_group(server_id):
+    """修改服务器所属分组"""
+    group_id_str = (request.form.get("group_id") or "").strip()
+    db = get_db()
+    server = db.execute(
+        "SELECT * FROM servers WHERE id = ? AND user_id = ?",
+        (server_id, session["user_id"]),
+    ).fetchone()
+    if not server:
+        abort(404)
+    group_id = None
+    if group_id_str:
+        try:
+            gid = int(group_id_str)
+            grp = db.execute(
+                "SELECT id FROM server_groups WHERE id = ? AND user_id = ?",
+                (gid, session["user_id"]),
+            ).fetchone()
+            if grp:
+                group_id = gid
+        except ValueError:
+            pass
+    db.execute(
+        "UPDATE servers SET group_id = ? WHERE id = ?",
+        (group_id, server_id),
+    )
+    db.commit()
+    flash("服务器分组已更新", "success")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/api/public_status")
 def api_public_status():
+    # 速率限制（每个 IP 每分钟 30 次）
+    allowed, remaining, retry = _check_rate_limit("api_status")
+    if not allowed:
+        return jsonify({
+            "error": "rate_limited",
+            "message": f"请求过于频繁，请 {retry} 秒后重试"
+        }), 429
     """只读公开接口：返回所有 is_public = 1 的服务器状态"""
     db = get_db()
     servers = db.execute(
@@ -1102,7 +1838,8 @@ def api_public_status():
     total_players = 0
     total_online = 0
     for s in servers:
-        info = ping_with_latency(s["host"], s["port"], timeout=5.0)
+        protocol = s.get("protocol") or "java"
+        info = ping_server(s["host"], s["port"], protocol=protocol, timeout=5.0)
         online = bool(info.get("online", False))
         show_players = bool(s["show_players"])
         entry = {
@@ -1160,15 +1897,27 @@ def api_public_status():
 @app.route("/api/status")
 @login_required
 def api_status():
+    # 速率限制（每个用户每分钟 30 次）
+    if session.get("user_id"):
+        allowed, remaining, retry = _check_rate_limit("api_status", f"u{session['user_id']}")
+        if not allowed:
+            return jsonify({
+                "error": "rate_limited",
+                "message": f"请求过于频繁，请 {retry} 秒后重试"
+            }), 429
     db = get_db()
     servers = db.execute(
-        "SELECT * FROM servers WHERE user_id = ? ORDER BY id ASC",
+        "SELECT s.*, g.name AS group_name "
+        "FROM servers s "
+        "LEFT JOIN server_groups g ON s.group_id = g.id "
+        "WHERE s.user_id = ? ORDER BY s.id ASC",
         (session["user_id"],),
     ).fetchall()
 
     results = []
     for s in servers:
-        info = ping_with_latency(s["host"], s["port"], timeout=10.0)
+        protocol = s.get("protocol") or "java"
+        info = ping_server(s["host"], s["port"], protocol=protocol, timeout=10.0)
         online = bool(info.get("online", False))
         show_players = bool(s["show_players"])
         entry = {
@@ -1176,8 +1925,11 @@ def api_status():
             "name": s["name"],
             "host": s["host"],
             "port": s["port"],
+            "protocol": protocol,
             "is_public": bool(s["is_public"]),
             "show_players": show_players,
+            "group_id": s["group_id"],
+            "group_name": s["group_name"],
             "online": online,
             "version": info.get("version") or "",
             "players_online": info.get("players_online"),
@@ -1225,10 +1977,13 @@ def api_status():
 @app.route("/api/test", methods=["POST"])
 @login_required
 def api_test():
-    """手动测试某个 MC 服务器的 API。返回完整的协议诊断和原始 JSON。"""
+    """手动测试某个服务器的 API。返回完整的协议诊断和原始 JSON。"""
     data_source = request.json if request.is_json else request.form
     host = (data_source.get("host") or "").strip()
     port_str = (data_source.get("port") or "").strip()
+    protocol = (data_source.get("protocol") or "java").strip().lower()
+    if protocol not in ("java", "bedrock", "http", "tcp"):
+        protocol = "java"
     try:
         port = int(port_str)
         if not (0 < port < 65536):
@@ -1248,10 +2003,28 @@ def api_test():
             "elapsed_ms": 0,
         }), 400
 
-    result = ping_with_timeout(host, port, overall_timeout=15.0, step_timeout=5.0)
-    result["host"] = host
-    result["port"] = port
-    return jsonify(result)
+    if protocol == "http":
+        result = ping_http_server(host, timeout=5.0)
+        result["host"] = host
+        result["port"] = 0
+        result["diagnostics"] = [f"[HTTP] 目标: {host}"]
+        return jsonify(result)
+    elif protocol == "tcp":
+        result = ping_tcp_server(host, port, timeout=3.0)
+        result["host"] = host
+        result["port"] = port
+        result["diagnostics"] = [f"[TCP] 目标: {host}:{port}"]
+        return jsonify(result)
+    elif protocol == "bedrock":
+        result = ping_with_timeout_bedrock(host, port, overall_timeout=15.0, step_timeout=5.0)
+        result["host"] = host
+        result["port"] = port
+        return jsonify(result)
+    else:
+        result = ping_with_timeout(host, port, overall_timeout=15.0, step_timeout=5.0)
+        result["host"] = host
+        result["port"] = port
+        return jsonify(result)
 
 
 @app.route("/api/server/<int:server_id>/history")
@@ -1581,6 +2354,525 @@ def api_minekuai_server_details(server_id):
 
 
 # ============================================================
+# 后台定时采集任务
+# ============================================================
+
+# 全局字典：存储每个 server_id 最近一次在线状态
+# {server_id: {"online": bool, "checked_at": str}}
+_POLL_LAST_STATE = {}
+
+
+# ============================================================
+# 速率限制 (Rate Limiting)
+# ============================================================
+# 每个 (bucket_key, 类别) 存储一个简单的 token 桶
+# {(key, bucket_name): {"tokens": int, "last_refill": float}}
+_RATE_LIMIT_TOKENS = {}
+
+# 配置：每个限制类别的速率（每分钟）
+_RATE_LIMIT_CONFIG = {
+    "login":         {"per_minute": 10, "max_burst": 10},   # 登录：每分钟 10 次
+    "api_status":    {"per_minute": 30, "max_burst": 30},   # 状态查询：每分钟 30 次
+    "api_alert":     {"per_minute": 60, "max_burst": 60},   # 告警 API：每分钟 60 次
+    "server_add":    {"per_minute": 5,  "max_burst": 5},    # 添加服务器：每分钟 5 次
+    "minekuai":      {"per_minute": 30, "max_burst": 30},   # 麦块联机 API：每分钟 30 次
+}
+
+
+def _get_client_ip():
+    """获取客户端 IP，优先取 X-Forwarded-For 头"""
+    try:
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+    except RuntimeError:
+        pass
+    try:
+        return request.remote_addr or "unknown"
+    except RuntimeError:
+        return "unknown"
+
+
+def _check_rate_limit(bucket_name, key=None):
+    """
+    检查当前请求是否超出速率限制
+    返回: (is_allowed: bool, remaining_tokens: int, retry_after_seconds: int)
+    """
+    if key is None:
+        key = _get_client_ip()
+
+    full_key = (key, bucket_name)
+    config = _RATE_LIMIT_CONFIG.get(bucket_name)
+    if not config:
+        return (True, -1, 0)
+
+    now = time.time()
+    tokens_per_sec = config["per_minute"] / 60.0
+
+    entry = _RATE_LIMIT_TOKENS.get(full_key)
+    if entry is None:
+        # 新客户端：允许
+        _RATE_LIMIT_TOKENS[full_key] = {
+            "tokens": float(config["max_burst"]) - 1,
+            "last_refill": now,
+        }
+        return (True, config["max_burst"] - 1, 0)
+
+    # 计算自上次请求以来应该补充多少 token
+    time_delta = now - entry["last_refill"]
+    new_tokens = entry["tokens"] + time_delta * tokens_per_sec
+    new_tokens = min(new_tokens, float(config["max_burst"]))
+
+    if new_tokens >= 1.0:
+        entry["tokens"] = new_tokens - 1.0
+        entry["last_refill"] = now
+        return (True, int(entry["tokens"]), 0)
+    else:
+        entry["tokens"] = new_tokens
+        entry["last_refill"] = now
+        # 需要多少秒后重试才能有 1 个 token
+        retry_after = int((1.0 - new_tokens) / tokens_per_sec) + 1
+        return (False, 0, retry_after)
+
+
+def rate_limit(bucket_name, include_user=False):
+    """装饰器：给路由加速率限制"""
+    def decorator(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            key = _get_client_ip()
+            if include_user and session.get("user_id"):
+                key = f"{key}_u{session['user_id']}"
+            allowed, remaining, retry = _check_rate_limit(bucket_name, key)
+            if not allowed:
+                response = {
+                    "error": "rate_limited",
+                    "message": f"请求过于频繁，请 {retry} 秒后重试",
+                    "retry_after_seconds": retry,
+                }
+                return jsonify(response), 429
+            return func(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def _check_apscheduler():
+    """确保 APScheduler 已安装"""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        return True
+    except ImportError:
+        print("⚠  缺少 APScheduler 模块，正在安装…")
+        import subprocess, sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "APScheduler", "-q"])
+        print("✅ APScheduler 安装完成。")
+        return True
+
+
+def _poll_all_servers():
+    """
+    后台任务：定期采集所有服务器的实时状态并写入 status_logs。
+    每次采集会对所有服务器并发执行 ping，检测掉线/恢复时生成告警。
+    """
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        return
+
+    db = None
+    try:
+        db = sqlite3.connect(DB_PATH)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys = ON")
+
+        # 获取所有需要采集的服务器
+        servers = db.execute(
+            "SELECT s.id, s.host, s.port, s.user_id, s.name, s.protocol FROM servers s"
+        ).fetchall()
+
+        if not servers:
+            return
+
+        def poll_one(server_row):
+            """对单个服务器执行 ping，返回结果 dict（含 user_id/name 用于告警）"""
+            try:
+                protocol = server_row.get("protocol") or "java"
+                info = ping_server(server_row["host"], server_row["port"], protocol=protocol, timeout=5.0)
+                return {
+                    "server_id": server_row["id"],
+                    "user_id": server_row["user_id"],
+                    "name": server_row["name"],
+                    "online": 1 if info.get("online") else 0,
+                    "players_online": info.get("players_online"),
+                    "players_max": info.get("players_max"),
+                    "version": info.get("version") or "",
+                    "motd": info.get("motd") or "",
+                    "latency_ms": info.get("latency_ms"),
+                    "error": info.get("error") or "",
+                    "protocol": protocol,
+                }
+            except Exception as e:
+                return {
+                    "server_id": server_row["id"],
+                    "user_id": server_row["user_id"],
+                    "name": server_row["name"],
+                    "online": 0,
+                    "players_online": None,
+                    "players_max": None,
+                    "version": "",
+                    "motd": "",
+                    "latency_ms": None,
+                    "error": str(e),
+                    "protocol": "java",
+                }
+
+        # 并发 ping 所有服务器
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(poll_one, s): s for s in servers}
+            for future in concurrent.futures.as_completed(futures, timeout=15):
+                try:
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                except Exception:
+                    pass
+
+        # 批量写入数据库，同时检测状态变化生成告警
+        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        alerts_to_insert = []
+
+        for r in results:
+            db.execute(
+                """INSERT INTO status_logs
+                   (server_id, online, players_online, players_max, version, motd, latency_ms, checked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    r["server_id"],
+                    r["online"],
+                    r["players_online"],
+                    r["players_max"],
+                    r["version"],
+                    r["motd"],
+                    r["latency_ms"],
+                    now,
+                ),
+            )
+
+            # 检测状态变化：与上一次记录对比
+            last = _POLL_LAST_STATE.get(r["server_id"])
+            prev_online = last["online"] if last else None
+
+            if prev_online is not None and prev_online != r["online"]:
+                # 状态切换：离线->在线 或 在线->离线
+                if r["online"]:
+                    event_type = "online"
+                    msg = f"✅ 服务器 \"{r['name']}\" 已恢复在线"
+                else:
+                    event_type = "offline"
+                    msg = f"🚨 服务器 \"{r['name']}\" 已掉线"
+                alerts_to_insert.append((
+                    r["server_id"], r["user_id"], event_type, msg, now
+                ))
+
+            # 更新内存中的最近状态
+            _POLL_LAST_STATE[r["server_id"]] = {
+                "online": bool(r["online"]),
+                "checked_at": now,
+            }
+
+        # 批量插入告警
+        for alert in alerts_to_insert:
+            db.execute(
+                """INSERT INTO alerts (server_id, user_id, event_type, message, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                alert,
+            )
+        if alerts_to_insert:
+            logging.info(f"[Scheduler] 生成 {len(alerts_to_insert)} 条告警")
+
+        db.commit()
+        logging.info(f"[Scheduler] 已采集 {len(results)} 台服务器状态")
+    except Exception as e:
+        logging.warning(f"[Scheduler] 采集失败: {e}")
+    finally:
+        if db:
+            db.close()
+
+
+def _cleanup_old_data():
+    """
+    定期清理过期数据：
+    - status_logs: 超过 logs_retention_days 天的记录（默认 30 天）
+    - alerts:     超过 alerts_retention_days 天的已读记录（默认 7 天），未读最多保留 30 天
+    """
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        return
+
+    db = None
+    try:
+        db = sqlite3.connect(DB_PATH)
+
+        # 读取配置
+        logs_days = 30
+        alerts_days = 7
+        try:
+            row = db.execute(
+                "SELECT key, value FROM settings WHERE key IN ('cleanup_logs_days', 'cleanup_alerts_days')"
+            ).fetchall()
+            for r in row:
+                if r["key"] == "cleanup_logs_days":
+                    try:
+                        logs_days = max(1, int(r["value"]))
+                    except (ValueError, TypeError):
+                        logs_days = 30
+                elif r["key"] == "cleanup_alerts_days":
+                    try:
+                        alerts_days = max(1, int(r["value"]))
+                    except (ValueError, TypeError):
+                        alerts_days = 7
+        except Exception:
+            pass
+
+        # 由于 SQLite 日期格式不一致，先用简单方式：根据 ID 范围估算
+        # 更精确的方式：用 checked_at/created_at 字段比较
+        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+
+        logs_cutoff = (datetime.utcnow() - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
+        alerts_cutoff = (datetime.utcnow() - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")
+        # 未读告警最多 30 天
+        unread_cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat(sep=" ", timespec="seconds")
+
+        # 删除过期日志
+        log_cursor = db.execute(
+            "SELECT COUNT(*) AS cnt FROM status_logs WHERE checked_at < ?",
+            (logs_cutoff,)
+        ).fetchone()
+        logs_deleted = log_cursor["cnt"] if log_cursor else 0
+        if logs_deleted > 0:
+            db.execute(
+                "DELETE FROM status_logs WHERE checked_at < ?",
+                (logs_cutoff,)
+            )
+
+        # 删除过期告警（已读超 alerts_days 天，或不管是否已读超 30 天）
+        alert_cursor = db.execute(
+            """SELECT COUNT(*) AS cnt FROM alerts
+               WHERE (acknowledged = 1 AND created_at < ?)
+                  OR (created_at < ?)""",
+            (alerts_cutoff, unread_cutoff)
+        ).fetchone()
+        alerts_deleted = alert_cursor["cnt"] if alert_cursor else 0
+        if alerts_deleted > 0:
+            db.execute(
+                """DELETE FROM alerts
+                   WHERE (acknowledged = 1 AND created_at < ?)
+                      OR (created_at < ?)""",
+                (alerts_cutoff, unread_cutoff)
+            )
+
+        db.commit()
+        if logs_deleted > 0 or alerts_deleted > 0:
+            logging.info(
+                f"[Cleanup] 已删除 {logs_deleted} 条状态历史 (>{logs_days}天), "
+                f"{alerts_deleted} 条告警 (已读>{alerts_days}天/ 任意>30天)"
+            )
+    except Exception as e:
+        logging.warning(f"[Cleanup] 清理失败: {e}")
+    finally:
+        if db:
+            db.close()
+
+
+# ============================================================
+# 告警 API
+# ============================================================
+@app.route("/api/alerts")
+@login_required
+def api_alerts():
+    """获取当前用户的未读告警列表（速率限制：每个用户每分钟 60 次）"""
+    if session.get("user_id"):
+        allowed, remaining, retry = _check_rate_limit("api_alert", f"u{session['user_id']}")
+        if not allowed:
+            return jsonify({
+                "error": "rate_limited",
+                "message": f"请求过于频繁，请 {retry} 秒后重试"
+            }), 429
+    db = get_db()
+    alerts = db.execute(
+        """SELECT a.*, s.name AS server_name, s.host, s.port
+           FROM alerts a
+           JOIN servers s ON a.server_id = s.id
+           WHERE a.user_id = ? AND a.acknowledged = 0
+           ORDER BY a.created_at DESC
+           LIMIT 50""",
+        (session["user_id"],)
+    ).fetchall()
+    return jsonify({"alerts": [dict(a) for a in alerts]})
+
+
+@app.route("/api/alerts/acknowledge", methods=["POST"])
+@login_required
+def api_alerts_acknowledge():
+    """确认（标记为已读）全部或指定告警"""
+    if session.get("user_id"):
+        allowed, remaining, retry = _check_rate_limit("api_alert", f"u{session['user_id']}")
+        if not allowed:
+            return jsonify({
+                "error": "rate_limited",
+                "message": f"请求过于频繁，请 {retry} 秒后重试"
+            }), 429
+    data = request.get_json(silent=True) or {}
+    alert_ids = data.get("alert_ids")
+    db = get_db()
+    if alert_ids:
+        placeholders = ",".join(["?"] * len(alert_ids))
+        db.execute(
+            f"""UPDATE alerts SET acknowledged = 1
+                WHERE id IN ({placeholders}) AND user_id = ?""",
+            alert_ids + [session["user_id"]]
+        )
+    else:
+        db.execute(
+            "UPDATE alerts SET acknowledged = 1 WHERE user_id = ?",
+            (session["user_id"],)
+        )
+    db.commit()
+    return jsonify({"success": True})
+
+
+@app.route("/api/alerts/count")
+@login_required
+def api_alerts_count():
+    """获取当前用户未确认告警数量（速率限制：每个用户每分钟 60 次）"""
+    if session.get("user_id"):
+        allowed, remaining, retry = _check_rate_limit("api_alert", f"u{session['user_id']}")
+        if not allowed:
+            return jsonify({"count": 0}), 429
+    db = get_db()
+    row = db.execute(
+        "SELECT COUNT(*) AS cnt FROM alerts WHERE user_id = ? AND acknowledged = 0",
+        (session["user_id"],)
+    ).fetchone()
+    return jsonify({"count": row["cnt"] if row else 0})
+
+
+@app.route("/alerts")
+@login_required
+def alerts_history():
+    """历史告警页面（支持分页和筛选）"""
+    page = request.args.get("page", "1")
+    event_filter = request.args.get("type", "all")
+    per_page = 30
+
+    try:
+        page = int(page)
+        if page < 1:
+            page = 1
+    except ValueError:
+        page = 1
+
+    db = get_db()
+
+    query_where = "WHERE a.user_id = ?"
+    params = [session["user_id"]]
+
+    if event_filter in ("offline", "online"):
+        query_where += " AND a.event_type = ?"
+        params.append(event_filter)
+
+    count_row = db.execute(
+        "SELECT COUNT(*) AS cnt FROM alerts a " + query_where,
+        params
+    ).fetchone()
+    total = count_row["cnt"] if count_row else 0
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+
+    alerts = db.execute(
+        """SELECT a.*, s.name AS server_name, s.host, s.port
+           FROM alerts a
+           LEFT JOIN servers s ON a.server_id = s.id
+           """ + query_where + """
+           ORDER BY a.created_at DESC
+           LIMIT ? OFFSET ?""",
+        params + [per_page, offset]
+    ).fetchall()
+
+    # 统计数据（SQLite 不支持 FILTER，使用 SUM(CASE WHEN)）
+    stats_row = db.execute(
+        """SELECT
+           SUM(CASE WHEN a.acknowledged = 0 AND a.event_type = 'offline' THEN 1 ELSE 0 END) AS unread_offline,
+           SUM(CASE WHEN a.acknowledged = 0 AND a.event_type = 'online' THEN 1 ELSE 0 END) AS unread_online,
+           SUM(CASE WHEN a.event_type = 'offline' THEN 1 ELSE 0 END) AS total_offline,
+           SUM(CASE WHEN a.event_type = 'online' THEN 1 ELSE 0 END) AS total_online
+           FROM alerts a
+           WHERE a.user_id = ?""",
+        (session["user_id"],)
+    ).fetchone()
+
+    stats = {
+        "unread_offline": stats_row["unread_offline"] if stats_row else 0,
+        "unread_online": stats_row["unread_online"] if stats_row else 0,
+        "total_offline": stats_row["total_offline"] if stats_row else 0,
+        "total_online": stats_row["total_online"] if stats_row else 0,
+        "total": total,
+    }
+
+    return render_template(
+        "alerts.html",
+        alerts=alerts,
+        page=page,
+        total_pages=total_pages,
+        total=total,
+        per_page=per_page,
+        event_filter=event_filter,
+        stats=stats,
+        username=session.get("username", ""),
+    )
+
+
+# ============================================================
+# 后台调度器启动
+# ============================================================
+def _start_scheduler():
+    """启动后台调度器，每 60 秒采集一次所有服务器状态"""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        return
+
+    scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+    # 每 60 秒执行一次全量采集
+    scheduler.add_job(
+        _poll_all_servers,
+        "interval",
+        seconds=60,
+        id="poll_all_servers",
+        replace_existing=True,
+        max_instances=1,
+    )
+    # 每天 03:00 清理一次过期数据
+    scheduler.add_job(
+        _cleanup_old_data,
+        "cron",
+        hour=3,
+        minute=0,
+        id="cleanup_old_data",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.start()
+    logging.info("[Scheduler] 后台定时采集任务已启动（每 60 秒），每日 03:00 自动清理过期数据")
+
+
+# ============================================================
 # 入口
 # ============================================================
 if __name__ == "__main__":
@@ -1594,5 +2886,12 @@ if __name__ == "__main__":
         print("✅ requests 安装完成，重新启动后即可使用麦块联机 API。")
         sys.exit(0)
 
+    # 启动检测：确保 APScheduler 已安装
+    _check_apscheduler()
+
     init_db()
+
+    # 启动后台定时采集调度器
+    _start_scheduler()
+
     app.run(host="0.0.0.0", port=5000, debug=False)

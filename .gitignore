@@ -1,41 +1,114 @@
-# Python
+# ============================================================
+#  Python
+# ============================================================
 __pycache__/
 *.py[cod]
-*.pyc
-*.pyo
-*.pyd
-.Python
+*$py.class
 *.so
-*.egg
-*.egg-info/
+.Python
+develop-eggs/
 dist/
-build/
+downloads/
 eggs/
-*.manifest
-*.zip
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual environments
+# PyInstaller
+build/
+*.spec.bak
+*.spec.manifest
+!mcmonitor.spec
+
+# ============================================================
+#  Virtual environments
+# ============================================================
 venv/
 env/
 .env
+.venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Project-specific
+# ============================================================
+#  Project-specific
+# ============================================================
+# 数据库文件（包含用户与服务器数据，**禁止提交**）
 mcmonitor.db
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# 便携 Python 运行时
 runtime/
 site-packages/
 
-# IDE
+# 用户上传 / 日志
+*.log
+logs/
+uploads/
+
+# ============================================================
+#  IDEs
+# ============================================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
 
-# OS
+# ============================================================
+#  OS
+# ============================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Thumbs.db.meta
 desktop.ini
+$RECYCLE.BIN/
 
-# Test / dev artifacts
-_seltest_*.py
+# ============================================================
+#  Test / dev artifacts
+# ============================================================
+_selftest_*.py
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+coverage.xml
+*.cover
+.hypothesis/
+
+# ============================================================
+#  Node (if adding JS toolchain later)
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================================
+#  Misc
+# ============================================================
+*.bak
+*.tmp
+*.orig
+*.rej
+secrets.json

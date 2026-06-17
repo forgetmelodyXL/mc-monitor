@@ -24,6 +24,12 @@ setlocal
 REM ============================================================
 REM   MC Server Monitor - Windows packaging script
 REM   Produces a single-file executable: dist\mcmonitor.exe
+REM
+REM   The resulting .exe is fully self-contained:
+REM     - bundles Python interpreter
+REM     - bundles Flask, requests, APScheduler
+REM     - bundles templates\ and static\
+REM     - creates mcmonitor.db next to the .exe at first run
 REM ============================================================
 
 cd /d "%~dp0"
@@ -46,9 +52,9 @@ for /f "tokens=2 delims= " %%i in ('python -V 2^>^&1') do set PY_VER=%%i
 echo [INFO] Python version detected: %PY_VER%
 echo.
 
-echo [1/4] Install / update dependencies (Flask + PyInstaller) ...
-python -m pip install --upgrade pip
-python -m pip install flask pyinstaller
+echo [1/5] Install / update dependencies (Flask + requests + APScheduler + PyInstaller) ...
+python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple --disable-pip-version-check >nul 2>nul
+python -m pip install --disable-pip-version-check -i https://pypi.tuna.tsinghua.edu.cn/simple flask requests APScheduler pyinstaller
 if errorlevel 1 (
     echo [ERROR] Dependency install failed. Check your network.
     pause
@@ -57,17 +63,27 @@ if errorlevel 1 (
 echo   Dependencies installed.
 echo.
 
-echo [2/4] Clean previous build artifacts ...
+echo [2/5] Clean previous build artifacts ...
 if exist build rmdir /s /q build
 if exist dist  rmdir /s /q dist
 echo   Cleaned.
 echo.
 
-echo [3/4] Build single-file executable with PyInstaller ...
-pyinstaller --onefile --clean ^
+echo [3/5] Build single-file executable with PyInstaller ...
+pyinstaller --onefile --clean --noconfirm ^
+    --name mcmonitor ^
     --add-data "templates;templates" ^
     --add-data "static;static" ^
-    --name mcmonitor ^
+    --collect-all apscheduler ^
+    --collect-all flask ^
+    --collect-all werkzeug ^
+    --collect-all jinja2 ^
+    --collect-all itsdangerous ^
+    --collect-all click ^
+    --collect-all markupsafe ^
+    --hidden-import=apscheduler.schedulers.background ^
+    --hidden-import=apscheduler.triggers.interval ^
+    --hidden-import=apscheduler.triggers.cron ^
     main.py
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed.
@@ -77,15 +93,17 @@ if errorlevel 1 (
 echo   Build complete.
 echo.
 
-echo [4/4] Output file ...
+echo [4/5] Output file ...
 if exist "dist\mcmonitor.exe" (
     echo   Built: %~dp0dist\mcmonitor.exe
     echo   Size:
     for %%A in ("dist\mcmonitor.exe") do echo         %%~zA bytes
     echo.
     echo ============================================================
-    echo   Done! You can move mcmonitor.exe to any folder and run it.
+    echo   Done! You can move mcmonitor.exe to ANY Windows folder
+    echo   (or even a USB drive) and double-click to run.
     echo   The database (mcmonitor.db) will be created next to the .exe.
+    echo   No Python, no Flask, no other dependency is required.
     echo ============================================================
 ) else (
     echo [ERROR] dist\mcmonitor.exe was NOT generated.
@@ -348,6 +366,12 @@ echo    - Double-click launch.bat in this folder.
 echo    - It downloads Python the first time (about 10 MB),
 echo      installs Flask, and opens the web UI automatically.
 echo.
+echo  Want a single .exe that needs NO Python installed?
+echo    - On the build machine, double-click build.bat
+echo    - It will create dist\mcmonitor.exe
+echo    - Copy that .exe to any Windows 10/11 PC
+echo    - Double-click - no Python, no pip, no install needed
+echo.
 echo  What each file does:
 echo    - launch.bat          : unified launcher - the only file you need
 echo    - build.bat           : (advanced) produce a single-file mcmonitor.exe
@@ -357,7 +381,7 @@ echo    - templates\          : HTML pages for the UI
 echo    - static\             : CSS / images
 echo    - mcmonitor.db        : (auto-created) user + server data
 echo.
-echo  After running launch.bat:
+echo  After running:
 echo    1) Your browser opens http://127.0.0.1:5000
 echo    2) Click "Register" and create a user name / password
 echo    3) Log in, then add your Minecraft server (host + port)

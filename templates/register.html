@@ -16,6 +16,7 @@
         </div>
     {% endif %}
 {% endwith %}
+{% from "base.html" import csrf_input with context %}
 <div class="auth-card">
     <div class="auth-header" style="display: flex; justify-content: space-between; align-items: center;">
         <div>
@@ -33,6 +34,7 @@
         </div>
     {% else %}
     <form class="auth-form" method="POST">
+        {{ csrf_input() }}
         <div class="form-group">
             <label for="username">用户名</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="32" autocomplete="username" autofocus>

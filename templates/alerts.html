@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史告警 - MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body">
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-container">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline btn-sm">仪表盘</a>
+            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
+            <form method="POST" action="{{ url_for('logout') }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm" style="background:#7a8bc0;color:white;">注销 {{ username }}</button>
+            </form>
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <section class="card">
+        <div class="card-header">
+            <h2>📜 历史告警</h2>
+            <p class="hint">查看所有服务器的掉线/恢复告警记录</p>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stat-grid" style="grid-template-columns: repeat(5, 1fr); margin-bottom: 24px;">
+            <div class="stat-card">
+                <div class="stat-label">告警总数</div>
+                <div class="stat-value">{{ stats.total }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🚨 掉线告警</div>
+                <div class="stat-value">{{ stats.total_offline }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">✅ 恢复通知</div>
+                <div class="stat-value">{{ stats.total_online }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🚨 未读掉线</div>
+                <div class="stat-value">{{ stats.unread_offline }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">✅ 未读恢复</div>
+                <div class="stat-value">{{ stats.unread_online }}</div>
+            </div>
+        </div>
+
+        <!-- 筛选与操作区 -->
+        <div class="alerts-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div class="alerts-filters" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <a href="{{ url_for('alerts_history', page=1, type='all') }}"
+                   class="btn btn-sm {% if event_filter == 'all' %}btn-primary{% else %}btn-outline{% endif %}"
+                   style="padding: 6px 14px;">全部</a>
+                <a href="{{ url_for('alerts_history', page=1, type='offline') }}"
+                   class="btn btn-sm {% if event_filter == 'offline' %}btn-primary{% else %}btn-outline{% endif %}"
+                   style="padding: 6px 14px;">🚨 掉线</a>
+                <a href="{{ url_for('alerts_history', page=1, type='online') }}"
+                   class="btn btn-sm {% if event_filter == 'online' %}btn-primary{% else %}btn-outline{% endif %}"
+                   style="padding: 6px 14px;">✅ 恢复</a>
+            </div>
+            <div>
+                <a href="#" class="btn btn-outline btn-sm" id="markAllRead">标记全部已读</a>
+            </div>
+        </div>
+
+        <!-- 告警列表 -->
+        <div class="alerts-list">
+            {% if alerts %}
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>类型</th>
+                            <th>服务器</th>
+                            <th>信息</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in alerts %}
+                        <tr>
+                            <td style="white-space: nowrap;">{{ alert.created_at }}</td>
+                            <td style="text-align: center;">
+                                {% if alert.event_type == 'offline' %}
+                                    <span style="color: #e35d5d; font-weight: 600;">🚨 掉线</span>
+                                {% else %}
+                                    <span style="color: #4caf50; font-weight: 600;">✅ 恢复</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div style="font-weight: 600;">{{ alert.server_name or '已删除服务器 #' ~ alert.server_id }}</div>
+                                {% if alert.host %}
+                                <div style="color: #8a8fa6; font-size: 12px; margin-top: 2px;">
+                                    {{ alert.host }}:{{ alert.port }}
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ alert.message }}</td>
+                            <td style="text-align: center;">
+                                {% if alert.acknowledged == 1 %}
+                                    <span style="color: #8a8fa6; font-size: 12px;">已读</span>
+                                {% else %}
+                                    <span style="color: #6c8dff; font-weight: 600; font-size: 12px;">● 未读</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <!-- 分页 -->
+                {% if total_pages > 1 %}
+                <div class="pagination" style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 24px; padding: 16px; border-top: 1px solid #e6e8f3;">
+                    <a href="{{ url_for('alerts_history', page=1, type=event_filter) }}"
+                       class="btn btn-outline btn-sm" {% if page == 1 %}style="opacity:0.4;pointer-events:none;"{% endif %}>« 首页</a>
+                    <a href="{{ url_for('alerts_history', page=page-1, type=event_filter) }}"
+                       class="btn btn-outline btn-sm" {% if page == 1 %}style="opacity:0.4;pointer-events:none;"{% endif %}>上一页</a>
+                    <span style="padding: 0 12px; font-weight: 600;">第 {{ page }} / {{ total_pages }} 页（共 {{ total }} 条）</span>
+                    <a href="{{ url_for('alerts_history', page=page+1, type=event_filter) }}"
+                       class="btn btn-outline btn-sm" {% if page == total_pages %}style="opacity:0.4;pointer-events:none;"{% endif %}>下一页</a>
+                    <a href="{{ url_for('alerts_history', page=total_pages, type=event_filter) }}"
+                       class="btn btn-outline btn-sm" {% if page == total_pages %}style="opacity:0.4;pointer-events:none;"{% endif %}>末页 »</a>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="empty-state">
+                    <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
+                    <div style="font-size: 16px; color: #2a2e5b; margin-bottom: 8px; font-weight: 600;">暂无告警记录</div>
+                    <div style="font-size: 13px; color: #8a8fa6;">后台监控系统每 60 秒检测一次服务器状态，状态变化时会自动生成告警</div>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+</main>
+
+<script>
+(function () {
+    const STORAGE_KEY = 'mcmonitor_dark_mode';
+    const toggle = document.getElementById('darkModeToggle');
+
+    function applyDarkMode(isDark) {
+        if (isDark) {
+            document.body.classList.add('dark-mode');
+            toggle.textContent = '☀️';
+            toggle.title = '切换到浅色模式';
+        } else {
+            document.body.classList.remove('dark-mode');
+            toggle.textContent = '🌙';
+            toggle.title = '切换到深色模式';
+        }
+    }
+
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === null) {
+        applyDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } else {
+        applyDarkMode(saved === '1');
+    }
+
+    toggle.addEventListener('click', function () {
+        const isDark = document.body.classList.contains('dark-mode');
+        const newIsDark = !isDark;
+        applyDarkMode(newIsDark);
+        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+    });
+
+    // 标记全部已读
+    document.getElementById('markAllRead').addEventListener('click', async function (e) {
+        e.preventDefault();
+        const btn = this;
+        const oldText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '处理中...';
+        try {
+            const res = await fetch('/api/alerts/acknowledge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (res.ok) {
+                btn.textContent = '✓ 已标记';
+                setTimeout(function () {
+                    window.location.reload();
+                }, 500);
+            } else {
+                throw new Error('HTTP ' + res.status);
+            }
+        } catch (err) {
+            btn.textContent = oldText;
+            btn.disabled = false;
+            alert('操作失败：' + err.message);
+        }
+    });
+})();
+</script>
+
+</body>
+</html>

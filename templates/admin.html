@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="dashboard-body">
+{% from "base.html" import csrf_input with context %}
 {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
         <div class="flash-container">
@@ -51,6 +52,7 @@
                     </p>
                 </div>
                 <form method="POST" action="{{ url_for('admin_toggle_register') }}">
+                    {{ csrf_input() }}
                     <button type="submit" class="btn btn-sm {% if registration_enabled %}btn-outline{% else %}btn-primary{% endif %}">
                         {{ '关闭注册' if registration_enabled else '开启注册' }}
                     </button>
@@ -68,9 +70,77 @@
                 </div>
                 <form method="POST" action="{{ url_for('admin_toggle_maintenance') }}"
                       onsubmit="return confirm('确定{% if maintenance_enabled %}关闭{% else %}开启{% endif %}维护模式？\n{% if maintenance_enabled %}所有访问将恢复正常{% else %}将导致除管理员外的其他用户被强制退出{% endif %}');">
+                    {{ csrf_input() }}
                     <button type="submit" class="btn btn-sm {% if maintenance_enabled %}btn-danger{% else %}btn-warning{% endif %}">
                         {{ '关闭维护' if maintenance_enabled else '开启维护' }}
                     </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>🗂 数据清理策略</h2>
+            <p class="hint">每日凌晨 03:00 自动清理过期数据，防止数据库无限增长</p>
+        </div>
+        <div class="stat-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 16px;">
+            <div class="stat-card">
+                <div class="stat-label">📊 状态历史记录</div>
+                <div class="stat-value">{{ status_logs_count }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🚨 告警记录</div>
+                <div class="stat-value">{{ alerts_count }}</div>
+            </div>
+        </div>
+
+        <div class="setting-card">
+            <div class="setting-row">
+                <div>
+                    <h3 class="setting-title">📊 状态历史保留</h3>
+                    <p class="setting-desc">保留最近 {{ cleanup_logs_days }} 天的服务器状态采集记录（默认 30 天）</p>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <form method="POST" action="{{ url_for('admin_update_cleanup_logs') }}" style="display: flex; gap: 6px;">
+                        {{ csrf_input() }}
+                        <input type="number" name="days" value="{{ cleanup_logs_days }}" min="1" max="365"
+                               style="width: 70px; padding: 6px 8px; border: 1px solid #d0d5e8; border-radius: 6px; font-size: 13px;">
+                        <span style="color: #8a8fa6; font-size: 13px;">天</span>
+                        <button type="submit" class="btn btn-sm btn-primary">更新</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="setting-card">
+            <div class="setting-row">
+                <div>
+                    <h3 class="setting-title">🚨 告警记录保留</h3>
+                    <p class="setting-desc">已读告警保留 {{ cleanup_alerts_days }} 天（默认 7 天），未读告警最多保留 30 天</p>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <form method="POST" action="{{ url_for('admin_update_cleanup_alerts') }}" style="display: flex; gap: 6px;">
+                        {{ csrf_input() }}
+                        <input type="number" name="days" value="{{ cleanup_alerts_days }}" min="1" max="365"
+                               style="width: 70px; padding: 6px 8px; border: 1px solid #d0d5e8; border-radius: 6px; font-size: 13px;">
+                        <span style="color: #8a8fa6; font-size: 13px;">天</span>
+                        <button type="submit" class="btn btn-sm btn-primary">更新</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="setting-card">
+            <div class="setting-row">
+                <div>
+                    <h3 class="setting-title">⚡ 立即清理</h3>
+                    <p class="setting-desc">立即按当前保留策略清理一次过期数据</p>
+                </div>
+                <form method="POST" action="{{ url_for('admin_run_cleanup') }}"
+                      onsubmit="return confirm('确定立即执行一次数据清理？')">
+                    {{ csrf_input() }}
+                    <button type="submit" class="btn btn-sm btn-outline">🗑 立即执行</button>
                 </form>
             </div>
         </div>
@@ -99,6 +169,7 @@
     <section class="card">
         <h2>🔐 修改自己的密码（防止默认 admin/admin 被访问）</h2>
         <form method="POST" action="{{ url_for('admin_change_own_password') }}" class="add-server-form">
+            {{ csrf_input() }}
             <div class="form-row">
                 <input type="password" name="new_password" placeholder="新密码 (至少 6 位)" required style="flex: 1;">
                 <button type="submit" class="btn btn-primary">更新我的密码</button>
@@ -143,6 +214,7 @@
                         <td>
                             <!-- 重置密码 -->
                             <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form">
+                                {{ csrf_input() }}
                                 <input type="text" name="new_password" placeholder="新密码" size="14" required>
                                 {% if u.username == 'admin' %}
                                     <input type="hidden" name="confirm_admin" value="1">
@@ -153,6 +225,7 @@
                             <!-- 切换管理员身份 (不能操作默认 admin) -->
                             {% if u.username != 'admin' %}
                             <form method="POST" action="{{ url_for('admin_toggle_admin', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
+                                {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm">
                                     {% if u.is_admin %}降为普通用户{% else %}升级为管理员{% endif %}
                                 </button>
@@ -164,6 +237,7 @@
                                 <summary style="cursor: pointer; color: #3b5bdb;">➕ 为该用户添加服务器</summary>
                                 <form method="POST" action="{{ url_for('admin_create_server_for_user', user_id=u.id) }}"
                                       class="add-server-form" style="padding: 8px 0; gap: 6px;">
+                                    {{ csrf_input() }}
                                     <input type="text" name="name" placeholder="名称" required>
                                     <input type="text" name="host" placeholder="主机/IP" required>
                                     <input type="number" name="port" placeholder="端口" min="1" max="65535" value="25565" required>
@@ -177,6 +251,7 @@
                             <form method="POST" action="{{ url_for('admin_delete_user', user_id=u.id) }}"
                                   class="inline-form" style="margin-top: 4px;"
                                   onsubmit="return confirm('确定删除用户 {{ u.username }}？将连同其 {{ u.server_count }} 台服务器一起删除');">
+                                {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm btn-danger">🗑 删除用户</button>
                             </form>
                             {% endif %}
@@ -213,6 +288,7 @@
                         <td>{{ s.owner_name }}</td>
                         <td>
                             <form method="POST" action="{{ url_for('admin_edit_server', server_id=s.id) }}" class="inline-form">
+                                {{ csrf_input() }}
                                 <input type="text" name="name" value="{{ s.name }}" required size="10">
                                 <input type="text" name="host" value="{{ s.host }}" required size="18">
                                 <input type="number" name="port" value="{{ s.port }}" min="1" max="65535" required size="6">
@@ -230,6 +306,7 @@
                         <td>{{ s.created_at }}</td>
                         <td>
                             <form method="POST" action="{{ url_for('admin_toggle_server_public', server_id=s.id) }}" class="inline-form">
+                                {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm">
                                     {% if s.is_public %}🔒 设为私有{% else %}🌐 设为公开{% endif %}
                                 </button>
@@ -237,6 +314,7 @@
                             <form method="POST" action="{{ url_for('admin_delete_server', server_id=s.id) }}"
                                   class="inline-form" style="margin-top: 4px;"
                                   onsubmit="return confirm('确定删除该服务器？');">
+                                {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm btn-danger">🗑 删除</button>
                             </form>
                         </td>

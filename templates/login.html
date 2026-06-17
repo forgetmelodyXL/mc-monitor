@@ -16,6 +16,7 @@
         </div>
     {% endif %}
 {% endwith %}
+{% from "base.html" import csrf_input with context %}
 <div class="auth-card">
     <div class="auth-header" style="display: flex; justify-content: space-between; align-items: center;">
         <div>
@@ -25,6 +26,7 @@
         <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式" style="font-size: 20px;">🌙</button>
     </div>
     <form class="auth-form" method="POST">
+        {{ csrf_input() }}
         <div class="form-group">
             <label for="username">用户名</label>
             <input type="text" id="username" name="username" required autocomplete="username" autofocus>

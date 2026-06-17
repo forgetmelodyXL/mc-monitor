@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>仪表盘 - MC 服务器监控</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body">
+{% from "base.html" import csrf_input with context %}
 {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
         <div class="flash-container">
@@ -24,8 +26,23 @@
             <span class="brand-text">MC 服务器监控</span>
         </div>
         <div class="topbar-right">
+            <!-- 告警铃铛 -->
+            <div class="alerts-wrapper" style="position: relative;">
+                <button class="alerts-bell" id="alertsBell" title="告警通知" style="background: transparent; border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 5px;">
+                    🔔
+                    <span class="alerts-badge hidden" id="alertsBadge" style="background: #e35d5d; color: #fff; border-radius: 10px; padding: 1px 5px; font-size: 11px; min-width: 18px; text-align: center; line-height: 16px;">0</span>
+                </button>
+                <div class="alerts-dropdown hidden" id="alertsDropdown" style="position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-height: 400px; overflow-y: auto; background: #fff; border: 1px solid #e6e8f3; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 1000;">
+                    <div style="padding: 12px 16px; border-bottom: 1px solid #e6e8f3; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; color: #2a2e5b; font-size: 14px;">告警通知</span>
+                        <button type="button" id="ackAllAlerts" style="background: transparent; border: none; color: #6c8dff; cursor: pointer; font-size: 12px; padding: 0;">全部已读</button>
+                    </div>
+                    <div id="alertsList"><!-- 动态加载 --></div>
+                </div>
+            </div>
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
+            <a href="{{ url_for('alerts_history') }}" class="btn btn-outline btn-sm">📜 历史告警</a>
             {% if session.is_admin %}
                 <a href="{{ url_for('admin_panel') }}" class="btn btn-sm" style="background:#e44;color:white;">🛡 管理后台</a>
             {% endif %}
@@ -57,9 +74,45 @@
 
     <section class="card">
         <div class="card-header">
+            <h2>🗂 服务器分组</h2>
+        </div>
+        <div class="groups-manager" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+            <!-- 创建新分组 -->
+            <form method="POST" action="{{ url_for('group_add') }}" style="display: flex; gap: 8px; align-items: center;">
+                {{ csrf_input() }}
+                <input type="text" name="name" placeholder="新分组名称" maxlength="32" style="padding: 6px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px; width: 160px;">
+                <button type="submit" class="btn btn-sm" style="background: #6c8dff; color: white;">+ 创建分组</button>
+            </form>
+            <!-- 已有分组列表 -->
+            {% for g in groups %}
+            <div class="group-tag" style="display: flex; align-items: center; gap: 6px; background: #eef1f7; border: 1px solid #d0d6e8; border-radius: 8px; padding: 5px 10px; font-size: 13px;">
+                <span style="font-weight: 500;">📁 {{ g.name }}</span>
+                <span style="color: #8a8fa6; font-size: 12px;">({{ servers|selectattr('group_id')|list|length if false }})</span>
+                <!-- 重命名 -->
+                <form method="POST" action="{{ url_for('group_rename', group_id=g.id) }}" style="display: inline-flex; gap: 4px;">
+                    {{ csrf_input() }}
+                    <input type="text" name="name" value="{{ g.name }}" maxlength="32" style="padding: 3px 6px; border: 1px solid #c0c6e0; border-radius: 4px; font-size: 12px; width: 100px;">
+                    <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #4caf50; color: white;">改</button>
+                </form>
+                <!-- 删除 -->
+                <form method="POST" action="{{ url_for('group_delete', group_id=g.id) }}" onsubmit="return confirm('确定删除分组 {{ g.name }}？服务器将移至未分组。');" style="display: inline;">
+                    {{ csrf_input() }}
+                    <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #e44; color: white;">删</button>
+                </form>
+            </div>
+            {% endfor %}
+            {% if not groups %}
+            <span class="hint" style="color: #8a8fa6; font-size: 13px;">暂无分组，先创建一个吧</span>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
             <h2>添加服务器</h2>
         </div>
         <form class="add-server-form" method="POST" action="{{ url_for('server_add') }}">
+            {{ csrf_input() }}
             <div class="form-row">
                 <div class="form-group">
                     <label>名称</label>
@@ -72,6 +125,24 @@
                 <div class="form-group form-group-port">
                     <label>端口</label>
                     <input type="number" name="port" value="25565" min="1" max="65535" required>
+                </div>
+                <div class="form-group">
+                    <label>分组</label>
+                    <select name="group_id" style="padding: 7px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px; min-width: 120px;">
+                        <option value="">— 无分组 —</option>
+                        {% for g in groups %}
+                        <option value="{{ g.id }}">{{ g.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>协议</label>
+                    <select name="protocol" style="padding: 7px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px; min-width: 100px;">
+                        <option value="java">Java</option>
+                        <option value="bedrock">Bedrock</option>
+                        <option value="http">HTTP(s)</option>
+                        <option value="tcp">TCP</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="checkbox-label">
@@ -95,6 +166,7 @@
             <span class="hint">每位用户独立绑定；仅您可使用</span>
         </div>
         <form class="add-server-form" method="POST" action="{{ url_for('minekuai_bind_key') }}">
+            {{ csrf_input() }}
             <div class="form-row">
                 <div class="form-group" style="flex: 2;">
                     <label>API Key</label>
@@ -115,6 +187,15 @@
         </div>
         <form class="add-server-form" id="testForm" onsubmit="return false;">
             <div class="form-row">
+                <div class="form-group">
+                    <label>协议</label>
+                    <select id="testProtocol" style="padding: 7px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px;">
+                        <option value="java">Java SLP</option>
+                        <option value="bedrock">Bedrock</option>
+                        <option value="http">HTTP(s)</option>
+                        <option value="tcp">TCP 端口</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label>地址 (Host)</label>
                     <input type="text" id="testHost" placeholder="如：s4.ungc.com.cn" required maxlength="253">
@@ -158,6 +239,16 @@
                 </label>
             </div>
         </div>
+        <!-- 搜索 & 筛选 -->
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;">
+            <input type="text" id="serverSearch" placeholder="🔍 搜索服务器名称或地址…" style="padding: 7px 12px; border: 1px solid #d0d6e8; border-radius: 8px; font-size: 13px; min-width: 200px; flex: 1;">
+            <div style="display: flex; gap: 6px;">
+                <button class="filter-btn active" data-filter="all" id="filterAll" style="padding: 6px 14px; border: 1px solid #d0d6e8; border-radius: 8px; background: #6c8dff; color: white; cursor: pointer; font-size: 13px;">全部</button>
+                <button class="filter-btn" data-filter="online" id="filterOnline" style="padding: 6px 14px; border: 1px solid #d0d6e8; border-radius: 8px; background: #fff; color: #2a2e5b; cursor: pointer; font-size: 13px;">🟢 在线</button>
+                <button class="filter-btn" data-filter="offline" id="filterOffline" style="padding: 6px 14px; border: 1px solid #d0d6e8; border-radius: 8px; background: #fff; color: #2a2e5b; cursor: pointer; font-size: 13px;">🔴 离线</button>
+            </div>
+            <span id="serverCountLabel" style="font-size: 12px; color: #8a8fa6; margin-left: auto;">—</span>
+        </div>
 
         {% if servers %}
         <div class="server-grid" id="serverGrid">
@@ -171,6 +262,7 @@
                         <div class="server-host">{{ s.host }}:{{ s.port }}</div>
                         <div class="server-owner-tag visibility-label">
                             {% if s.is_public %}公开 · 任何人可在主页看到{% else %}私有 · 仅自己可见{% endif %}
+                            <span class="protocol-badge" style="margin-left: 6px; background: #6c8dff; color: white; padding: 1px 6px; border-radius: 4px; font-size: 11px;">{{ s.protocol|upper }}</span>
                         </div>
                     </div>
                     <div class="server-status status-loading">检测中…</div>
@@ -179,6 +271,19 @@
                     <div class="meta-item"><span class="meta-label">版本</span><span class="meta-value meta-version">—</span></div>
                     <div class="meta-item"><span class="meta-label">玩家</span><span class="meta-value meta-players">—</span></div>
                     <div class="meta-item"><span class="meta-label">延迟</span><span class="meta-value meta-latency">—</span></div>
+                    <div class="meta-item">
+                        <span class="meta-label">分组</span>
+                        <form method="POST" action="{{ url_for('server_set_group', server_id=s.id) }}" style="display: inline; margin-left: 4px;" class="group-set-form">
+                            {{ csrf_input() }}
+                            <select name="group_id" style="padding: 2px 5px; border: 1px solid #d0d6e8; border-radius: 4px; font-size: 12px; min-width: 90px;"
+                                    onchange="this.form.submit()">
+                                <option value="">— 无分组 —</option>
+                                {% for g in groups %}
+                                <option value="{{ g.id }}" {% if s.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    </div>
                 </div>
                 <div class="server-motd">
                     <span class="meta-label">MOTD / 描述</span>
@@ -189,6 +294,17 @@
                     <div class="players-list"></div>
                 </div>
                 <div class="server-error hidden"></div>
+
+                <!-- 历史图表区域 -->
+                <div class="server-chart-box hidden" data-server-id="{{ s.id }}">
+                    <div class="server-chart-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                        <span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>
+                        <button type="button" class="btn btn-sm btn-chart-close" data-server-id="{{ s.id }}" style="padding: 2px 8px; font-size: 12px;">收起</button>
+                    </div>
+                    <div style="position: relative; height: 160px;">
+                        <canvas class="server-chart" data-server-id="{{ s.id }}"></canvas>
+                    </div>
+                </div>
 
                 <!-- 麦块联机控制区域 -->
                 <div class="minekuai-box">
@@ -204,6 +320,7 @@
                           action="{{ url_for('server_bind_minekuai_instance', server_id=s.id) }}"
                           class="minekuai-bind-form"
                           data-server-id="{{ s.id }}">
+                        {{ csrf_input() }}
                         <div class="minekuai-bind-row">
                             <label class="meta-label" style="min-width:auto;">实例 ID</label>
                             <input type="text" name="instance_id"
@@ -246,10 +363,16 @@
                 </div>
 
                 <div class="server-actions">
+                    <button type="button" class="btn btn-sm btn-show-chart"
+                            data-server-id="{{ s.id }}"
+                            style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
+                        📈 查看图表
+                    </button>
                     <form method="POST"
                           action="{{ url_for('server_toggle_public', server_id=s.id) }}"
                           class="public-toggle-form"
                           data-server-id="{{ s.id }}">
+                        {{ csrf_input() }}
                         <button type="submit" class="btn btn-sm btn-public-toggle">
                             {% if s.is_public %}🔓 已公开 · 点击设为私有{% else %}🔒 已私有 · 点击设为公开{% endif %}
                         </button>
@@ -258,12 +381,14 @@
                           action="{{ url_for('server_toggle_show_players', server_id=s.id) }}"
                           class="show-players-toggle-form"
                           data-server-id="{{ s.id }}">
+                        {{ csrf_input() }}
                         <button type="submit" class="btn btn-sm btn-show-players-toggle">
                             {% if s.show_players %}👁 显示玩家名中 · 点击隐藏{% else %}🙈 已隐藏玩家名 · 点击显示{% endif %}
                         </button>
                     </form>
                     <form method="POST" action="{{ url_for('server_delete', server_id=s.id) }}"
                           onsubmit="return confirm('确定删除该服务器？');">
+                        {{ csrf_input() }}
                         <button type="submit" class="btn btn-sm btn-danger">删除</button>
                     </form>
                 </div>
@@ -392,7 +517,12 @@
             const btn = form.querySelector('button');
             if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
             try {
-                const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                const formData = new FormData(form);
+                const res = await fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'Accept': 'application/json' }
+                });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 // 立即更新卡片，而不用等下一轮刷新
@@ -424,7 +554,12 @@
             const btn = form.querySelector('button');
             if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
             try {
-                const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                const formData = new FormData(form);
+                const res = await fetch(url, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'Accept': 'application/json' }
+                });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 const id = parseInt(form.dataset.serverId, 10);
@@ -487,12 +622,11 @@
             const val = (input.value || '').trim();
             if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
             try {
-                const body = new FormData();
-                body.append('instance_id', val);
+                const formData = new FormData(form);
                 const res = await fetch(url, {
                     method: 'POST',
-                    headers: { 'Accept': 'application/json' },
-                    body: body
+                    body: formData,
+                    headers: { 'Accept': 'application/json' }
                 });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
@@ -586,6 +720,66 @@
         });
     });
 
+    // ---- 服务器搜索 & 筛选 ----
+    (function () {
+        const searchInput = document.getElementById('serverSearch');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const serverCountLabel = document.getElementById('serverCountLabel');
+        let currentFilter = 'all';
+        let currentSearch = '';
+
+        function applyServerFilter() {
+            const cards = document.querySelectorAll('.server-card');
+            let visible = 0;
+            cards.forEach(card => {
+                const name = (card.querySelector('.server-name') || {}).textContent || '';
+                const host = (card.querySelector('.server-host') || {}).textContent || '';
+                const statusEl = card.querySelector('.server-status');
+                const isOnline = statusEl && statusEl.classList.contains('status-online');
+                const isOffline = statusEl && statusEl.classList.contains('status-offline');
+                const searchLower = currentSearch.toLowerCase();
+                const matchText = !currentSearch || name.toLowerCase().includes(searchLower) || host.toLowerCase().includes(searchLower);
+                const matchFilter = currentFilter === 'all' ||
+                    (currentFilter === 'online' && isOnline) ||
+                    (currentFilter === 'offline' && isOffline);
+                if (matchText && matchFilter) {
+                    card.style.display = '';
+                    visible++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            if (serverCountLabel) {
+                serverCountLabel.textContent = '显示 ' + visible + ' / ' + cards.length + ' 台服务器';
+            }
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                currentSearch = this.value.trim();
+                applyServerFilter();
+            });
+        }
+
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', function () {
+                currentFilter = this.dataset.filter;
+                filterBtns.forEach(b => {
+                    b.classList.remove('active');
+                    b.style.background = '#fff';
+                    b.style.color = '#2a2e5b';
+                });
+                this.classList.add('active');
+                this.style.background = '#6c8dff';
+                this.style.color = 'white';
+                applyServerFilter();
+            });
+        });
+
+        // 暴露给 refresh 后重新筛选
+        window._applyServerFilter = applyServerFilter;
+    })();
+
     async function refresh() {
         if (refreshBtn) {
             refreshBtn.disabled = true;
@@ -596,6 +790,7 @@
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             updateCards(data);
+            if (window._applyServerFilter) window._applyServerFilter();
         } catch (e) {
             lastRefreshEl.textContent = '刷新失败：' + e.message;
         } finally {
@@ -629,6 +824,7 @@
     async function runTest() {
         const host = (testHost.value || '').trim();
         const portRaw = (testPort.value || '').trim();
+        const protocol = (document.getElementById('testProtocol').value || 'java').trim();
         const port = parseInt(portRaw, 10);
         if (!host || !port || port <= 0 || port >= 65536) {
             testStatus.textContent = '请输入有效的主机和端口';
@@ -660,6 +856,7 @@
             const body = new FormData();
             body.append('host', host);
             body.append('port', String(port));
+            body.append('protocol', protocol);
 
             const timerId = setTimeout(() => {
                 controller.abort('前端超时 ' + (FRONTEND_TIMEOUT_MS / 1000) + 's：服务器响应太慢或本机无法连接。');
@@ -734,6 +931,352 @@
     setupAuto();
     refresh();
 
+    // ---- 历史图表渲染 ----
+    const _chartInstances = {};  // 存储每个服务器的 Chart 实例
+
+    function _fmtChartTime(isoStr) {
+        try {
+            const d = new Date(isoStr);
+            return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        } catch { return ''; }
+    }
+
+    async function _loadAndRenderChart(serverId, card) {
+        const chartBox = card.querySelector('.server-chart-box');
+        const canvas = card.querySelector('.server-chart');
+        if (!canvas) return;
+
+        // 如果已有实例，先销毁
+        if (_chartInstances[serverId]) {
+            _chartInstances[serverId].destroy();
+            delete _chartInstances[serverId];
+        }
+
+        try {
+            const res = await fetch('/api/server/' + serverId + '/history?limit=60');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            const history = data.history || [];
+
+            if (history.length === 0) {
+                // 没有历史数据时显示提示
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '13px -apple-system, sans-serif';
+                ctx.fillStyle = '#8a8fa6';
+                ctx.textAlign = 'center';
+                ctx.fillText('暂无历史数据，后台采集启动后会自动记录', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            // 反转数组（最旧的在前）与 labels
+            const labels = history.map(h => _fmtChartTime(h.checked_at)).reverse();
+            const onlineData = history.map(h => h.online ? (h.players_online || 0) : null).reverse();
+            const latencyData = history.map(h => h.latency_ms).reverse();
+
+            const isDark = document.body.classList.contains('dark-mode');
+            const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+            const textColor = isDark ? '#8a8fa6' : '#6b6f8a';
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '在线人数',
+                            data: onlineData,
+                            borderColor: '#4caf50',
+                            backgroundColor: 'rgba(76,175,80,0.1)',
+                            borderWidth: 2,
+                            pointRadius: history.length > 30 ? 0 : 3,
+                            pointHoverRadius: 5,
+                            tension: 0.3,
+                            fill: true,
+                            spanGaps: false,
+                        },
+                        {
+                            label: '延迟 (ms)',
+                            data: latencyData,
+                            borderColor: '#6c8dff',
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.3,
+                            yAxisID: 'y1',
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 8,
+                                font: { size: 11 },
+                                color: textColor,
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function (items) {
+                                    return items[0] ? items[0].label : '';
+                                },
+                                label: function (ctx) {
+                                    if (ctx.datasetIndex === 0) {
+                                        const val = ctx.raw;
+                                        return val === null ? '离线' : '在线人数: ' + val;
+                                    }
+                                    return '延迟: ' + ctx.raw + ' ms';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: { color: gridColor },
+                            ticks: {
+                                maxTicksLimit: 8,
+                                font: { size: 10 },
+                                color: textColor,
+                                maxRotation: 0,
+                            }
+                        },
+                        y: {
+                            display: true,
+                            min: 0,
+                            grid: { color: gridColor },
+                            ticks: {
+                                font: { size: 10 },
+                                color: textColor,
+                                stepSize: 1,
+                            },
+                            title: {
+                                display: true,
+                                text: '在线人数',
+                                color: textColor,
+                                font: { size: 10 },
+                            }
+                        },
+                        y1: {
+                            display: true,
+                            position: 'right',
+                            min: 0,
+                            grid: { drawOnChartArea: false },
+                            ticks: {
+                                font: { size: 10 },
+                                color: textColor,
+                            },
+                            title: {
+                                display: true,
+                                text: '延迟 (ms)',
+                                color: textColor,
+                                font: { size: 10 },
+                            }
+                        }
+                    }
+                }
+            });
+
+            _chartInstances[serverId] = chart;
+        } catch (e) {
+            console.error('加载图表失败:', e);
+        }
+    }
+
+    // ---- 查看图表按钮 ----
+    document.querySelectorAll('.btn-show-chart').forEach(btn => {
+        btn.addEventListener('click', async function () {
+            const id = parseInt(this.dataset.serverId, 10);
+            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+            if (!card) return;
+
+            const chartBox = card.querySelector('.server-chart-box');
+            const btnText = this.textContent.trim();
+
+            if (btnText === '📈 查看图表') {
+                // 显示图表并加载数据
+                chartBox.classList.remove('hidden');
+                this.textContent = '📈 收起图表';
+                await _loadAndRenderChart(id, card);
+            } else {
+                // 收起图表
+                chartBox.classList.add('hidden');
+                this.textContent = '📈 查看图表';
+            }
+        });
+    });
+
+    // ---- 收起图表按钮 ----
+    document.querySelectorAll('.btn-chart-close').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const id = parseInt(this.dataset.serverId, 10);
+            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
+            if (!card) return;
+
+            const chartBox = card.querySelector('.server-chart-box');
+            chartBox.classList.add('hidden');
+
+            // 同步按钮文案
+            const showBtn = card.querySelector('.btn-show-chart');
+            if (showBtn) showBtn.textContent = '📈 查看图表';
+        });
+    });
+
+    // ---- 告警通知系统 ----
+    (function () {
+        const bell = document.getElementById('alertsBell');
+        const badge = document.getElementById('alertsBadge');
+        const dropdown = document.getElementById('alertsDropdown');
+        const alertsList = document.getElementById('alertsList');
+        const ackAllBtn = document.getElementById('ackAllAlerts');
+
+        let alertCount = 0;
+
+        function formatAlertTime(isoStr) {
+            try {
+                const d = new Date(isoStr);
+                const now = new Date();
+                const diff = Math.floor((now - d) / 1000);
+                if (diff < 60) return '刚刚';
+                if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+                if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+                return d.toLocaleDateString('zh-CN');
+            } catch { return isoStr; }
+        }
+
+        function applyAlertDarkMode(isDark) {
+            const header = dropdown.querySelector('div');
+            if (header) {
+                header.style.borderColor = isDark ? 'var(--dm-border)' : '#e6e8f3';
+                header.style.background = isDark ? 'var(--dm-surface)' : '#fff';
+            }
+            const items = dropdown.querySelectorAll('.alert-item');
+            items.forEach(item => {
+                item.style.background = isDark ? 'var(--dm-surface)' : '#fff';
+                item.style.borderColor = isDark ? 'var(--dm-border)' : '#e6e8f3';
+                const msg = item.querySelector('.alert-msg');
+                if (msg) msg.style.color = isDark ? 'var(--dm-text)' : '#2a2e5b';
+                const time = item.querySelector('.alert-time');
+                if (time) time.style.color = isDark ? 'var(--dm-text-muted)' : '#8a8fa6';
+            });
+        }
+
+        async function loadAlerts() {
+            try {
+                const res = await fetch('/api/alerts');
+                if (!res.ok) return;
+                const data = await res.json();
+                const alerts = data.alerts || [];
+
+                alertCount = alerts.length;
+                if (alertCount > 0) {
+                    badge.textContent = alertCount > 99 ? '99+' : alertCount;
+                    badge.classList.remove('hidden');
+                    bell.style.borderColor = '#e35d5d';
+                } else {
+                    badge.classList.add('hidden');
+                    bell.style.borderColor = '';
+                }
+
+                if (alerts.length === 0) {
+                    alertsList.innerHTML = '<div style="padding: 24px; text-align: center; color: #8a8fa6; font-size: 13px;">暂无新告警</div>';
+                    return;
+                }
+
+                const isDark = document.body.classList.contains('dark-mode');
+                alertsList.innerHTML = alerts.map(a => {
+                    const icon = a.event_type === 'offline' ? '🚨' : '✅';
+                    return '<div class="alert-item" data-id="' + a.id + '" style="padding: 10px 16px; border-bottom: 1px solid ' + (isDark ? 'var(--dm-border)' : '#e6e8f3') + '; background: ' + (isDark ? 'var(--dm-surface)' : '#fff') + '; cursor: pointer; transition: background 0.15s;" onmouseover="this.style.background=' + (isDark ? 'var(--dm-surface-hover)' : '#f5f6fa') + '" onmouseout="this.style.background=' + (isDark ? 'var(--dm-surface)' : '#fff') + '">' +
+                        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                            '<span style="font-size:14px;">' + icon + '</span>' +
+                            '<span class="alert-msg" style="font-size:13px;font-weight:500;color:' + (isDark ? 'var(--dm-text)' : '#2a2e5b') + ';">' + a.message + '</span>' +
+                        '</div>' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span style="font-size:12px;color:' + (isDark ? 'var(--dm-text-muted)' : '#8a8fa6') + ';">' + (a.server_name || '') + ' · ' + formatAlertTime(a.created_at) + '</span>' +
+                            '<button type="button" class="ack-single" data-id="' + a.id + '" style="background:transparent;border:none;color:#6c8dff;cursor:pointer;font-size:12px;padding:0;">忽略</button>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+
+                // 单条忽略
+                alertsList.querySelectorAll('.ack-single').forEach(btn => {
+                    btn.addEventListener('click', async function (e) {
+                        e.stopPropagation();
+                        const id = parseInt(this.dataset.id, 10);
+                        await fetch('/api/alerts/acknowledge', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ alert_ids: [id] })
+                        });
+                        loadAlerts();
+                    });
+                });
+
+                // 点击整行也标记已读
+                alertsList.querySelectorAll('.alert-item').forEach(item => {
+                    item.addEventListener('click', async function () {
+                        const id = parseInt(this.dataset.id, 10);
+                        await fetch('/api/alerts/acknowledge', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ alert_ids: [id] })
+                        });
+                        loadAlerts();
+                    });
+                });
+            } catch (e) {
+                alertsList.innerHTML = '<div style="padding: 16px; color: #e35d5d; font-size: 13px;">加载告警失败</div>';
+            }
+        }
+
+        // 点击铃铛切换下拉
+        bell.addEventListener('click', function (e) {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+            if (!dropdown.classList.contains('hidden')) {
+                loadAlerts();
+            }
+        });
+
+        // 点击页面其他地方关闭
+        document.addEventListener('click', function (e) {
+            if (!dropdown.contains(e.target) && e.target !== bell) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // 全部已读
+        ackAllBtn.addEventListener('click', async function () {
+            await fetch('/api/alerts/acknowledge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({})
+            });
+            badge.classList.add('hidden');
+            bell.style.borderColor = '';
+            loadAlerts();
+        });
+
+        // 每 30 秒轮询一次新告警
+        loadAlerts();
+        setInterval(loadAlerts, 30000);
+
+        // 暴露给深色模式切换时同步样式
+        window._applyAlertDarkMode = applyAlertDarkMode;
+    })();
+
     // ---- Dark Mode Toggle ----
     (function () {
         const STORAGE_KEY = 'mcmonitor_dark_mode';
@@ -749,6 +1292,7 @@
                 toggle.textContent = '🌙';
                 toggle.title = '切换到深色模式';
             }
+            if (window._applyAlertDarkMode) window._applyAlertDarkMode(isDark);
         }
 
         function init() {
@@ -771,6 +1315,17 @@
 
         init();
     })();
+
+    // ---- PWA: 注册 Service Worker ----
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/static/sw.js').then(function (reg) {
+                console.log('[SW] 注册成功:', reg.scope);
+            }).catch(function (err) {
+                console.log('[SW] 注册失败:', err);
+            });
+        });
+    }
 })();
 </script>
 </body>

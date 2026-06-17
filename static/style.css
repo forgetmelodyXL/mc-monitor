@@ -908,6 +908,43 @@ body.dark-mode .dark-mode-toggle:hover {
     background: rgba(255, 255, 255, 0.05);
 }
 
+/* ---- Server Chart ---- */
+.server-chart-box {
+    background: #fbfcff;
+    border: 1px solid #e6e8f3;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 8px;
+}
+body.dark-mode .server-chart-box {
+    background: var(--dm-surface);
+    border-color: var(--dm-border);
+}
+.btn-show-chart:hover {
+    text-decoration: none;
+    background: #e0e5f0 !important;
+}
+body.dark-mode .btn-show-chart {
+    background: var(--dm-surface) !important;
+    color: var(--dm-text) !important;
+    border-color: var(--dm-border) !important;
+}
+body.dark-mode .btn-show-chart:hover {
+    background: var(--dm-surface-hover) !important;
+}
+
+/* ---- Alerts Bell ---- */
+.alerts-bell {
+    transition: border-color 0.2s;
+}
+body.dark-mode .alerts-bell {
+    border-color: rgba(255, 255, 255, 0.2) !important;
+}
+.alerts-badge {
+    line-height: 16px;
+    font-weight: 600;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .admin-table th, .admin-table td {
