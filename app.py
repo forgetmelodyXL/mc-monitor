@@ -1487,7 +1487,8 @@ def admin_reset_password(user_id):
         return redirect(url_for("admin_panel"))
 
     if user["username"] == "admin" and not request.form.get("confirm_admin"):
-        pass
+        flash("请确认重置admin账号密码", "error")
+        return redirect(url_for("admin_panel"))
 
     new_password = (request.form.get("new_password") or "").strip()
     if len(new_password) < 6:
