@@ -7,15 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="dashboard-body">
-{% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        <div class="flash-container">
-            {% for category, message in messages %}
-                <div class="flash flash-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        </div>
-    {% endif %}
-{% endwith %}
+{% set _ = get_flashed_messages(with_categories=true) %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -104,8 +96,8 @@
                 <div class="server-players hidden">
                     <span class="meta-label">在线玩家</span>
                     <div class="players-list"></div>
+                    <button type="button" class="btn btn-sm btn-outline btn-public-players-more hidden">更多</button>
                 </div>
-                <div class="server-error hidden"></div>
             </div>
             {% endfor %}
         </div>
@@ -131,6 +123,24 @@
         </div>
     </footer>
 </main>
+
+<!-- ========== 全部玩家模态框（公共页面） ========== -->
+<div class="modal-overlay hidden" id="publicPlayersModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="publicPlayersTitle">全部在线玩家</h3>
+            <button type="button" class="modal-close" id="publicPlayersModalClose">✕</button>
+        </div>
+        <div class="modal-body">
+            <div id="publicPlayersListContainer" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <span style="color: #8a8fa6;">暂无玩家数据</span>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" id="publicPlayersCancelBtn">关闭</button>
+        </div>
+    </div>
+</div>
 
 <script>
 (function () {
@@ -158,21 +168,12 @@
             if (!info) return;
 
             const statusEl = card.querySelector('.server-status');
-            const errEl = card.querySelector('.server-error');
             if (info.online) {
                 statusEl.className = 'server-status status-online';
                 statusEl.textContent = '● 在线';
-                errEl.classList.add('hidden');
-                errEl.textContent = '';
             } else {
                 statusEl.className = 'server-status status-offline';
                 statusEl.textContent = '● 离线';
-                if (info.error) {
-                    errEl.textContent = '错误: ' + info.error;
-                    errEl.classList.remove('hidden');
-                } else {
-                    errEl.classList.add('hidden');
-                }
             }
 
             card.querySelector('.meta-version').textContent = info.version || '—';
@@ -187,22 +188,41 @@
             motd.textContent = (info.online && info.motd) ? info.motd : '—';
 
             // 玩家具体名单 - 仅当服务端返回 show_players=true 且有 players_sample 时显示
+            // 最多显示 10 名，超过则通过「更多」按钮弹窗查看全部
             const playersBox = card.querySelector('.server-players');
             const playersList = card.querySelector('.players-list');
+            const moreBtn = card.querySelector('.btn-public-players-more');
             if (playersBox) {
                 if (info.show_players && info.players_sample && info.players_sample.length) {
-                    playersList.innerHTML = '';
+                    const allNames = [];
                     info.players_sample.forEach(p => {
                         const name = (typeof p === 'string') ? p : (p && p.name ? p.name : '');
-                        if (!name) return;
+                        if (name) allNames.push(name);
+                    });
+                    // 渲染前 10 个
+                    playersList.innerHTML = '';
+                    const visible = allNames.slice(0, 10);
+                    visible.forEach(n => {
                         const item = document.createElement('span');
                         item.className = 'player-name-tag';
-                        item.textContent = name;
+                        item.textContent = n;
                         playersList.appendChild(item);
                     });
+                    // 如果超过 10，显示「更多」按钮并把全部数据挂到按钮上
+                    if (moreBtn) {
+                        if (allNames.length > 10) {
+                            moreBtn.textContent = '更多（共 ' + allNames.length + ' 人）';
+                            moreBtn.classList.remove('hidden');
+                            moreBtn.dataset.serverName = info.name;
+                            moreBtn.dataset.allPlayers = JSON.stringify(allNames);
+                        } else {
+                            moreBtn.classList.add('hidden');
+                        }
+                    }
                     playersBox.classList.remove('hidden');
                 } else {
                     playersList.innerHTML = '';
+                    if (moreBtn) moreBtn.classList.add('hidden');
                     playersBox.classList.add('hidden');
                 }
             }
@@ -286,6 +306,47 @@
 
         init();
     })();
+
+    // ---- 公共页面「更多」玩家弹窗 ----
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('click', function (e) {
+        var moreBtn = e.target.closest('.btn-public-players-more');
+        if (moreBtn && !moreBtn.classList.contains('hidden')) {
+            var serverName = moreBtn.dataset.serverName || '服务器';
+            var allPlayersData = moreBtn.dataset.allPlayers;
+            var container = document.getElementById('publicPlayersListContainer');
+            var title = document.getElementById('publicPlayersTitle');
+            title.textContent = serverName + ' 全部在线玩家';
+            try {
+                var names = JSON.parse(allPlayersData);
+                if (names && names.length) {
+                    container.innerHTML = names.map(function (n) {
+                        return '<span class="player-name-tag">' + escapeHtml(n) + '</span>';
+                    }).join('');
+                } else {
+                    container.innerHTML = '<span style="color: #8a8fa6;">暂无玩家数据</span>';
+                }
+            } catch (err) {
+                container.innerHTML = '<span style="color: #8a8fa6;">暂无玩家数据</span>';
+            }
+            document.getElementById('publicPlayersModal').classList.remove('hidden');
+        }
+    });
+
+    document.getElementById('publicPlayersModalClose').addEventListener('click', function () {
+        document.getElementById('publicPlayersModal').classList.add('hidden');
+    });
+    document.getElementById('publicPlayersCancelBtn').addEventListener('click', function () {
+        document.getElementById('publicPlayersModal').classList.add('hidden');
+    });
+    document.getElementById('publicPlayersModal').addEventListener('click', function (e) {
+        if (e.target === this) this.classList.add('hidden');
+    });
 })();
 </script>
 </body>

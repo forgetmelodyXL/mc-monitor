@@ -58,7 +58,15 @@ def main():
             pass
 
     try:
-        app_module.app.run(host=host, port=port, debug=False, use_reloader=False)
+        if app_module.IS_PRODUCTION:
+            try:
+                from waitress import serve
+                serve(app_module.app, host=host, port=port, threads=4)
+            except ImportError:
+                print("WARNING: waitress not installed, falling back to Flask dev server")
+                app_module.app.run(host=host, port=port, debug=False, use_reloader=False)
+        else:
+            app_module.app.run(host=host, port=port, debug=False, use_reloader=False)
     except KeyboardInterrupt:
         print("\n已停止服务。")
 

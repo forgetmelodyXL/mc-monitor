@@ -8,9 +8,12 @@ import secrets
 import hashlib
 import time
 import logging
+import logging.handlers
 import concurrent.futures
 from datetime import datetime, timedelta
 from functools import wraps
+
+import db as db_module
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
 if _this_dir not in sys.path:
@@ -76,34 +79,151 @@ DB_PATH = os.path.join(DATA_DIR, "mcmonitor.db")
 TEMPLATE_DIR = os.path.join(RESOURCE_DIR, "templates")
 STATIC_DIR = os.path.join(RESOURCE_DIR, "static")
 
+_ENV = os.environ.get("MCMONITOR_ENV", "development").lower()
+IS_PRODUCTION = _ENV == "production"
+
 app = Flask(
     __name__,
     template_folder=TEMPLATE_DIR,
     static_folder=STATIC_DIR,
 )
-app.config["SECRET_KEY"] = "mc-monitor-server-secret-key-change-in-production-2024"
+app.config["SECRET_KEY"] = os.environ.get(
+    "MCMONITOR_SECRET_KEY",
+    "mc-monitor-server-secret-key-change-in-production-2024",
+)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION
+app.config["PREFERRED_URL_SCHEME"] = "https" if IS_PRODUCTION else "http"
+
+if IS_PRODUCTION and app.config["SECRET_KEY"] == "mc-monitor-server-secret-key-change-in-production-2024":
+    print("WARNING: Using default SECRET_KEY in production mode. Set MCMONITOR_SECRET_KEY env var.")
+
+
+def _setup_logging():
+    log_level = os.environ.get("MCMONITOR_LOG_LEVEL", "INFO").upper()
+    log_dir = os.environ.get("MCMONITOR_LOG_DIR", DATA_DIR)
+    os.makedirs(log_dir, exist_ok=True)
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, log_level, logging.INFO))
+
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    access_fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # 控制台（非生产环境）
+    if not IS_PRODUCTION:
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(fmt)
+        root.addHandler(console)
+
+    # 应用日志（轮转，保留 10 个文件，每个 5MB）
+    app_log = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "mcmonitor.log"),
+        maxBytes=5 * 1024 * 1024,
+        backupCount=10,
+        encoding="utf-8",
+    )
+    app_log.setFormatter(fmt)
+    root.addHandler(app_log)
+
+    # 审计日志（独立文件，不轮转，由数据清理策略管理）
+    audit_logger = logging.getLogger("audit")
+    audit_logger.propagate = False
+    audit_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "audit.log"),
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    audit_handler.setFormatter(access_fmt)
+    audit_logger.addHandler(audit_handler)
+
+    # 抑制 Flask/Werkzeug 的默认日志，避免重复
+    werkzeug_logger = logging.getLogger("werkzeug")
+    werkzeug_logger.handlers.clear()
+    if IS_PRODUCTION:
+        werkzeug_logger.setLevel(logging.WARNING)
+    else:
+        access_handler = logging.StreamHandler(sys.stdout)
+        access_handler.setFormatter(access_fmt)
+        werkzeug_logger.addHandler(access_handler)
+        werkzeug_logger.setLevel(logging.INFO)
+
+    logging.info("Logging initialized: env=%s level=%s", _ENV, log_level)
+
+
+_setup_logging()
+
+
+def _audit(action: str, detail: str = "", user_id=None, username=None):
+    user_id = user_id or session.get("user_id")
+    username = username or session.get("username", "anonymous")
+    ip = _get_client_ip()
+    logging.getLogger("audit").info(
+        "user=%s(%s) ip=%s action=%s detail=%s",
+        username, user_id or "-", ip, action, detail,
+    )
 
 
 # ============================================================
-# 数据库
+# 数据库（委托给 db 模块，支持 SQLite / PostgreSQL / MySQL）
 # ============================================================
 def get_db():
-    if "db" not in g:
-        path = app.config.get("DATABASE") or DB_PATH
-        g.db = sqlite3.connect(path)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-    return g.db
+    return db_module.get_db()
 
 
 @app.teardown_appcontext
 def close_db(_exc):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
+    db_module.close_db()
+
+
+def row_get(row, key, default=None):
+    return db_module.row_get(row, key, default)
+
+
+def _ensure_schema(db):
+    """确保数据库包含所有新表和新列（用于兼容旧数据库）。
+
+    在访问 server_groups/protocol/group_id/show_players/minekuai_* 等
+    新 schema 前调用。所有 ALTER TABLE 都用 try/except 包裹，重复执行无害。
+    """
+    try:
+        db.execute("SELECT 1 FROM server_groups LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        try:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS server_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+        except Exception:
+            pass
+    for col_sql in (
+        "ALTER TABLE servers ADD COLUMN group_id INTEGER",
+        "ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'java'",
+        "ALTER TABLE servers ADD COLUMN show_players INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE servers ADD COLUMN minekuai_instance_id TEXT",
+        "ALTER TABLE servers ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN minekuai_api_key TEXT",
+    ):
+        try:
+            db.execute(col_sql)
+        except sqlite3.OperationalError:
+            pass
 
 
 # ============================================================
@@ -236,150 +356,13 @@ def _run_migrations(conn):
 
 
 def init_db():
-    # ── 启动检测：确保 requests 已安装（麦块联机 API 依赖）────────────
-    try:
-        import requests  # noqa: F401
-    except ImportError:
-        import subprocess, sys
-        print("⚠  缺少 requests 模块，正在自动安装…")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
-        import requests  # noqa: F401
-        print("✅ requests 安装完成，服务正在启动。")
-    # ─────────────────────────────────────────────────────────────────
-
+    """初始化数据库（委托给 db 模块）。"""
     path = None
     try:
-        # 优先使用 app.config['DATABASE']（如果已初始化应用）
         path = app.config.get("DATABASE") or DB_PATH
     except RuntimeError:
         path = DB_PATH
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-
-    # ── 运行数据库迁移 ────────────────────────────────────────────────
-    _run_migrations(conn)
-    # ─────────────────────────────────────────────────────────────────
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        is_admin INTEGER NOT NULL DEFAULT 0,
-        minekuai_api_key TEXT,
-        created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS servers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        group_id INTEGER,
-        name TEXT NOT NULL,
-        host TEXT NOT NULL,
-        port INTEGER NOT NULL DEFAULT 25565,
-        protocol TEXT NOT NULL DEFAULT 'java',
-        is_public INTEGER NOT NULL DEFAULT 0,
-        show_players INTEGER NOT NULL DEFAULT 1,
-        minekuai_instance_id TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY(group_id) REFERENCES server_groups(id) ON DELETE SET NULL
-    );
-    CREATE TABLE IF NOT EXISTS server_groups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_servers_group ON servers(user_id, group_id);
-    CREATE TABLE IF NOT EXISTS status_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER NOT NULL,
-        online INTEGER NOT NULL,
-        players_online INTEGER,
-        players_max INTEGER,
-        version TEXT,
-        motd TEXT,
-        latency_ms INTEGER,
-        checked_at TEXT NOT NULL,
-        FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_logs_server_time ON status_logs(server_id, checked_at DESC);
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        event_type TEXT NOT NULL,
-        message TEXT NOT NULL,
-        acknowledged INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_alerts_user_ack ON alerts(user_id, acknowledged, created_at DESC);
-    """)
-    # 迁移：老数据库补列
-    try:
-        conn.execute("ALTER TABLE servers ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    try:
-        conn.execute("ALTER TABLE servers ADD COLUMN show_players INTEGER NOT NULL DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN minekuai_api_key TEXT")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    try:
-        conn.execute("ALTER TABLE servers ADD COLUMN minekuai_instance_id TEXT")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    try:
-        conn.execute("ALTER TABLE servers ADD COLUMN group_id INTEGER REFERENCES server_groups(id)")
-    except sqlite3.OperationalError:
-        pass  # 列已存在或表不存在（稍后重建）
-    try:
-        conn.execute("ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'java'")
-    except sqlite3.OperationalError:
-        pass  # 列已存在
-    # 默认开关值
-    now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
-    default_settings = [
-        ("registration_enabled", "1"),
-        ("maintenance_enabled", "0"),
-        ("cleanup_logs_days", "30"),
-        ("cleanup_alerts_days", "7"),
-    ]
-    for default_key, default_value in default_settings:
-        existing = conn.execute("SELECT 1 FROM settings WHERE key = ?", (default_key,)).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                (default_key, default_value, now),
-            )
-    # 自动创建默认管理员账号 (admin / admin)
-    try:
-        existing = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, 1, ?)",
-                ("admin", hash_password("admin"), now),
-            )
-    except Exception:
-        pass
-    conn.commit()
-    conn.close()
+    db_module.init_db(path)
 
 
 def hash_password(password: str) -> str:
@@ -425,10 +408,7 @@ def validate_csrf_token():
     token = form_token if form_token else header_token
     if not token or not session_token:
         return False
-    result = secrets.compare_digest(token, session_token)
-    # 验证后刷新 token（一次性）
-    session[CSRF_TOKEN_NAME] = secrets.token_hex(32)
-    return result
+    return secrets.compare_digest(token, session_token)
 
 
 def csrf_protect(view):
@@ -495,6 +475,17 @@ def internal_error(e):
     return render_template("500.html"), 500
 
 
+@app.route("/health")
+def health_check():
+    """健康检查：返回 200 表示服务存活，返回 503 表示数据库不可用"""
+    try:
+        db = get_db()
+        db.execute("SELECT 1")
+        return jsonify({"status": "ok", "db": "ok"}), 200
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "db": str(e)}), 503
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -527,14 +518,76 @@ def set_setting(key: str, value: str) -> None:
 
 
 def admin_required(view):
-    """仅管理员可访问的视图装饰器"""
+    """需要管理员及以上角色（admin / super_admin）"""
     @wraps(view)
     @login_required
     def wrapped(*args, **kwargs):
-        if not session.get("is_admin"):
+        role = session.get("role", "")
+        if not db_module.has_permission(role, "settings.read"):
             abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+def role_required(permission):
+    """基于 RBAC 权限的装饰器"""
+    def decorator(view):
+        @wraps(view)
+        @login_required
+        def wrapped(*args, **kwargs):
+            role = session.get("role", "user")
+            if not db_module.has_permission(role, permission):
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+@app.route("/metrics")
+@login_required
+@admin_required
+def metrics():
+    """监控指标页：轮询成功率、延迟、失败统计"""
+    db = get_db()
+    total = db.fetchone("SELECT COUNT(*) as cnt FROM status_logs")
+    total_checks = total["cnt"] if total else 0
+    online = db.fetchone("SELECT COUNT(*) as cnt FROM status_logs WHERE online = 1")
+    online_checks = online["cnt"] if online else 0
+    success_rate = round(online_checks / total_checks * 100, 1) if total_checks > 0 else 0
+    avg_lat = db.fetchone(
+        "SELECT AVG(latency_ms) as avg_ms FROM status_logs WHERE online = 1 AND latency_ms IS NOT NULL"
+    )
+    avg_latency = round(avg_lat["avg_ms"], 1) if avg_lat and avg_lat["avg_ms"] else 0
+    since = (datetime.utcnow() - timedelta(hours=24)).isoformat(sep=" ", timespec="seconds")
+    fail_24h = db.fetchone(
+        "SELECT COUNT(*) as cnt FROM status_logs WHERE online = 0 AND checked_at >= ?", (since,)
+    )
+    fail_count_24h = fail_24h["cnt"] if fail_24h else 0
+    total_24h = db.fetchone(
+        "SELECT COUNT(*) as cnt FROM status_logs WHERE checked_at >= ?", (since,)
+    )
+    check_count_24h = total_24h["cnt"] if total_24h else 0
+    servers = db.fetchall(
+        "SELECT s.id, s.name, s.host, s.port, s.protocol, s.user_id, u.username, "
+        "(SELECT online FROM status_logs WHERE server_id = s.id ORDER BY checked_at DESC LIMIT 1) as online, "
+        "(SELECT players_online FROM status_logs WHERE server_id = s.id ORDER BY checked_at DESC LIMIT 1) as players, "
+        "(SELECT latency_ms FROM status_logs WHERE server_id = s.id ORDER BY checked_at DESC LIMIT 1) as latency, "
+        "(SELECT checked_at FROM status_logs WHERE server_id = s.id ORDER BY checked_at DESC LIMIT 1) as last_check "
+        "FROM servers s LEFT JOIN users u ON s.user_id = u.id ORDER BY s.name"
+    )
+    recent_fails = db.fetchall(
+        "SELECT sl.server_id, s.name, sl.error_msg, sl.checked_at "
+        "FROM status_logs sl JOIN servers s ON sl.server_id = s.id "
+        "WHERE sl.online = 0 AND sl.error_msg IS NOT NULL "
+        "ORDER BY sl.checked_at DESC LIMIT 20"
+    )
+    return render_template(
+        "metrics.html",
+        total_checks=total_checks, online_checks=online_checks,
+        success_rate=success_rate, avg_latency=avg_latency,
+        fail_count_24h=fail_count_24h, check_count_24h=check_count_24h,
+        servers=servers, recent_fails=recent_fails, roles=db_module.ROLES,
+    )
 
 
 # ============================================================
@@ -1212,6 +1265,7 @@ def register():
                 )
                 db.commit()
                 flash("注册成功，请登录", "success")
+                _audit("register", f"new user: {username}", user_id=None, username=username)
                 return redirect(url_for("login"))
     return render_template("register.html", registration_disabled=False)
 
@@ -1241,7 +1295,9 @@ def login():
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["is_admin"] = bool(user["is_admin"])
+            session["role"] = row_get(user, "role", "admin" if user["is_admin"] else "user")
             session.permanent = True
+            _audit("login", "success", user_id=user["id"], username=user["username"])
             next_url = request.args.get("next") or url_for("dashboard")
             if not next_url.startswith("/"):
                 next_url = url_for("dashboard")
@@ -1257,6 +1313,7 @@ def maintenance():
 
 @app.route("/logout")
 def logout():
+    _audit("logout")
     session.clear()
     return redirect(url_for("login"))
 
@@ -1268,15 +1325,34 @@ def logout():
 @admin_required
 def admin_panel():
     db = get_db()
-    users = db.execute(
-        "SELECT id, username, is_admin, created_at, "
+    users_raw = db.execute(
+        "SELECT id, username, is_admin, role, created_at, "
         "(SELECT COUNT(*) FROM servers s WHERE s.user_id = u.id) AS server_count "
         "FROM users u ORDER BY u.id ASC"
     ).fetchall()
-    servers = db.execute(
+    users = []
+    for u in users_raw:
+        user = dict(u)
+        user["role_label"] = db_module.get_role_label(
+            row_get(u, "role", "admin" if u["is_admin"] else "user")
+        )
+        users.append(user)
+    server_rows = db.execute(
         "SELECT s.*, u.username AS owner_name "
         "FROM servers s JOIN users u ON s.user_id = u.id ORDER BY s.id DESC"
     ).fetchall()
+    servers = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "host": r["host"],
+            "port": r["port"],
+            "owner_name": r["owner_name"],
+            "created_at": row_get(r, "created_at", ""),
+            "is_public": bool(row_get(r, "is_public", 0)),
+        }
+        for r in server_rows
+    ]
     total_users = len(users)
     total_servers = len(servers)
     total_public = sum(1 for s in servers if s["is_public"])
@@ -1314,6 +1390,7 @@ def admin_toggle_register():
     current = get_setting("registration_enabled", "1")
     new_val = "0" if current == "1" else "1"
     set_setting("registration_enabled", new_val)
+    _audit("toggle_registration", f"set to {new_val}")
     flash("已%s注册功能" % ("开启" if new_val == "1" else "关闭"), "success")
     return redirect(url_for("admin_panel"))
 
@@ -1324,6 +1401,7 @@ def admin_toggle_maintenance():
     current = get_setting("maintenance_enabled", "0")
     new_val = "0" if current == "1" else "1"
     set_setting("maintenance_enabled", new_val)
+    _audit("toggle_maintenance", f"set to {new_val}")
     flash("已%s维护模式" % ("开启" if new_val == "1" else "关闭"), "success")
     # 如果关闭维护模式，把普通用户踢出去
     if new_val == "0":
@@ -1396,6 +1474,7 @@ def admin_reset_password(user_id):
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                (hash_password(new_password), user_id))
     db.commit()
+    _audit("admin_reset_password", f"target user: {user['username']}")
     flash(f"已重置用户 {user['username']} 的密码为: {new_password}", "success")
     return redirect(url_for("admin_panel"))
 
@@ -1404,17 +1483,50 @@ def admin_reset_password(user_id):
 @admin_required
 def admin_toggle_admin(user_id):
     db = get_db()
-    user = db.execute("SELECT id, username, is_admin FROM users WHERE id = ?",
+    user = db.execute("SELECT id, username, is_admin, role FROM users WHERE id = ?",
                       (user_id,)).fetchone()
     if not user:
         abort(404)
     if user["username"] == "admin":
         flash("不能修改默认管理员 admin 的身份", "error")
         return redirect(url_for("admin_panel"))
-    new_val = 0 if (user["is_admin"] or 0) == 1 else 1
-    db.execute("UPDATE users SET is_admin = ? WHERE id = ?", (new_val, user_id))
+    current_role = row_get(user, "role", "user")
+    new_role = "admin" if current_role not in ("admin", "super_admin") else "user"
+    new_is_admin = 1 if new_role in ("admin", "super_admin") else 0
+    db.execute("UPDATE users SET is_admin = ?, role = ? WHERE id = ?", (new_is_admin, new_role, user_id))
     db.commit()
-    flash(f"已将用户 {user['username']} 设为{'管理员' if new_val else '普通用户'}", "success")
+    _audit("admin_toggle_admin", f"target: {user['username']} -> {new_role}")
+    flash(f"已将用户 {user['username']} 设为{db_module.get_role_label(new_role)}", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/users/<int:user_id>/set-role", methods=["POST"])
+@admin_required
+def admin_set_role(user_id):
+    """设置用户角色"""
+    new_role = (request.form.get("role") or "").strip()
+    if new_role not in db_module.ROLES:
+        flash("无效的角色", "error")
+        return redirect(url_for("admin_panel"))
+    db = get_db()
+    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        abort(404)
+    if user["username"] == "admin" and new_role != "super_admin":
+        flash("不能降级默认管理员 admin", "error")
+        return redirect(url_for("admin_panel"))
+    actor_role = session.get("role", "user")
+    if new_role == "super_admin" and actor_role != "super_admin":
+        flash("只有超级管理员才能设置超级管理员角色", "error")
+        return redirect(url_for("admin_panel"))
+    if not db_module.can_manage_role(actor_role, row_get(user, "role", "user")):
+        flash("你不能管理该用户的角色", "error")
+        return redirect(url_for("admin_panel"))
+    is_admin = 1 if new_role in ("admin", "super_admin") else 0
+    db.execute("UPDATE users SET role = ?, is_admin = ? WHERE id = ?", (new_role, is_admin, user_id))
+    db.commit()
+    _audit("admin_set_role", f"target: {user['username']} -> {new_role}")
+    flash(f"已将用户 {user['username']} 设为{db_module.get_role_label(new_role)}", "success")
     return redirect(url_for("admin_panel"))
 
 
@@ -1433,6 +1545,7 @@ def admin_delete_user(user_id):
         return redirect(url_for("admin_panel"))
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     db.commit()
+    _audit("admin_delete_user", f"deleted user: {user['username']}")
     flash(f"已删除用户 {user['username']} 及其全部服务器", "success")
     return redirect(url_for("admin_panel"))
 
@@ -1461,6 +1574,7 @@ def admin_delete_server(server_id):
         abort(404)
     db.execute("DELETE FROM servers WHERE id = ?", (server_id,))
     db.commit()
+    _audit("admin_delete_server", f"deleted server: {server['name']}")
     flash(f"已删除服务器 {server['name']}", "success")
     return redirect(url_for("admin_panel"))
 
@@ -1488,6 +1602,7 @@ def admin_edit_server(server_id):
     db.execute("UPDATE servers SET name = ?, host = ?, port = ? WHERE id = ?",
                (name[:64], host[:253], port, server_id))
     db.commit()
+    _audit("admin_edit_server", f"edited server: {name}")
     flash(f"服务器 {name} 已更新", "success")
     return redirect(url_for("admin_panel"))
 
@@ -1519,6 +1634,7 @@ def admin_create_server_for_user(user_id):
          datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
     )
     db.commit()
+    _audit("admin_create_server", f"created server: {name} for user_id={user_id}")
     flash(f"已为用户添加服务器: {name}", "success")
     return redirect(url_for("admin_panel"))
 
@@ -1543,14 +1659,45 @@ def admin_change_own_password():
 @login_required
 def dashboard():
     db = get_db()
-    servers = db.execute(
-        "SELECT * FROM servers WHERE user_id = ? ORDER BY CASE WHEN group_id IS NULL THEN 0 ELSE 1 END, group_id ASC, id ASC",
+    _ensure_schema(db)
+    # 用 SELECT * 避免旧数据库缺列导致查询崩溃；ORDER BY 的新字段用 row_get 等效处
+    server_rows = db.execute(
+        "SELECT * FROM servers WHERE user_id = ?",
         (session["user_id"],),
     ).fetchall()
-    groups = db.execute(
-        "SELECT * FROM server_groups WHERE user_id = ? ORDER BY sort_order ASC, id ASC",
-        (session["user_id"],),
-    ).fetchall()
+
+    # 统一转成 dict，对新字段（group_id/protocol/show_players/minekuai_instance_id/is_public）提供默认值
+    def _server_dict(row):
+        return {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "host": row["host"],
+            "port": row["port"],
+            "group_id": row_get(row, "group_id"),
+            "protocol": row_get(row, "protocol", "java"),
+            "is_public": bool(row_get(row, "is_public", 0)),
+            "show_players": bool(row_get(row, "show_players", 1)),
+            "minekuai_instance_id": row_get(row, "minekuai_instance_id"),
+            "sort_order": row_get(row, "sort_order", 0),
+            "created_at": row_get(row, "created_at", ""),
+        }
+
+    # 按 group_id 和 sort_order 排序
+    servers = sorted(
+        (_server_dict(r) for r in server_rows),
+        key=lambda s: (s["group_id"] is not None, s["group_id"] or 0, s["sort_order"] or 0, s["id"]),
+    )
+
+    # groups：旧数据库可能没有 server_groups 表，用 try/except 保护
+    try:
+        group_rows = db.execute(
+            "SELECT * FROM server_groups WHERE user_id = ? ORDER BY sort_order ASC, id ASC",
+            (session["user_id"],),
+        ).fetchall()
+        groups = [{"id": r["id"], "name": r["name"], "sort_order": r["sort_order"]} for r in group_rows]
+    except sqlite3.OperationalError:
+        groups = []
     return render_template("dashboard.html",
                            servers=servers,
                            groups=groups,
@@ -1587,6 +1734,7 @@ def server_add():
         return redirect(url_for("dashboard"))
 
     db = get_db()
+    _ensure_schema(db)
     # 验证 group_id 归属当前用户
     group_id = None
     if group_id_str:
@@ -1601,20 +1749,34 @@ def server_add():
         except ValueError:
             pass
 
-    db.execute(
-        "INSERT INTO servers (user_id, group_id, name, host, port, protocol, is_public, show_players, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
-        (
-            session["user_id"],
-            group_id,
-            name[:64],
-            host[:253],
-            port,
-            protocol,
-            show_players,
-            datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
-        ),
-    )
+    try:
+        db.execute(
+            "INSERT INTO servers (user_id, group_id, name, host, port, protocol, is_public, show_players, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (
+                session["user_id"],
+                group_id,
+                name[:64],
+                host[:253],
+                port,
+                protocol,
+                show_players,
+                datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+            ),
+        )
+    except sqlite3.OperationalError:
+        # 旧数据库无新字段时，降级为基础字段插入
+        db.execute(
+            "INSERT INTO servers (user_id, name, host, port, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                session["user_id"],
+                name[:64],
+                host[:253],
+                port,
+                datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+            ),
+        )
     db.commit()
+    _audit("server_add", f"added server: {name}")
     flash(f"已添加服务器：{name}", "success")
     return redirect(url_for("dashboard"))
 
@@ -1631,25 +1793,99 @@ def server_delete(server_id):
         abort(404)
     db.execute("DELETE FROM servers WHERE id = ?", (server_id,))
     db.commit()
+    _audit("server_delete", f"deleted server: {server['name']}")
     flash("服务器已删除", "success")
     return redirect(url_for("dashboard"))
 
 
-@app.route("/server/<int:server_id>/toggle-public", methods=["POST"])
+@app.route("/server/<int:server_id>/edit", methods=["POST"])
 @login_required
-def server_toggle_public(server_id):
+def server_edit(server_id):
     db = get_db()
+    _ensure_schema(db)
     server = db.execute(
         "SELECT * FROM servers WHERE id = ? AND user_id = ?",
         (server_id, session["user_id"]),
     ).fetchone()
     if not server:
         abort(404)
-    new_val = 0 if (server["is_public"] or 0) == 1 else 1
-    db.execute(
-        "UPDATE servers SET is_public = ? WHERE id = ?",
-        (new_val, server_id),
-    )
+    name = (request.form.get("name") or "").strip()
+    host = (request.form.get("host") or "").strip()
+    port_str = (request.form.get("port") or "").strip() or "25565"
+    protocol = (request.form.get("protocol") or "java").strip().lower()
+    if protocol not in ("java", "bedrock", "http", "tcp"):
+        protocol = "java"
+    try:
+        port = int(port_str)
+        if port < 1 or port > 65535:
+            raise ValueError()
+    except ValueError:
+        flash("端口必须是 1-65535 的整数", "error")
+        return redirect(url_for("dashboard"))
+    if not name or not host:
+        flash("请填写完整的服务器名称和地址", "error")
+        return redirect(url_for("dashboard"))
+    try:
+        db.execute(
+            "UPDATE servers SET name = ?, host = ?, port = ?, protocol = ? WHERE id = ?",
+            (name[:64], host[:253], port, protocol, server_id),
+        )
+    except sqlite3.OperationalError:
+        db.execute(
+            "UPDATE servers SET name = ?, host = ?, port = ? WHERE id = ?",
+            (name[:64], host[:253], port, server_id),
+        )
+    db.commit()
+    _audit("server_edit", f"edited server: {server['name']} -> {name}")
+    flash(f"服务器 {name} 已更新", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/server/reorder", methods=["POST"])
+@login_required
+def server_reorder():
+    """拖拽排序：接收 JSON {order: [id1, id2, ...]}"""
+    db = get_db()
+    _ensure_schema(db)
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "无效数据"}), 400
+    order = data.get("order", [])
+    if not isinstance(order, list):
+        return jsonify({"error": "无效数据"}), 400
+    for idx, sid in enumerate(order):
+        row = db.execute(
+            "SELECT id FROM servers WHERE id = ? AND user_id = ?",
+            (sid, session["user_id"]),
+        ).fetchone()
+        if row:
+            try:
+                db.execute("UPDATE servers SET sort_order = ? WHERE id = ?", (idx, sid))
+            except sqlite3.OperationalError:
+                pass
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/server/<int:server_id>/toggle-public", methods=["POST"])
+@login_required
+def server_toggle_public(server_id):
+    db = get_db()
+    _ensure_schema(db)
+    server = db.execute(
+        "SELECT * FROM servers WHERE id = ? AND user_id = ?",
+        (server_id, session["user_id"]),
+    ).fetchone()
+    if not server:
+        abort(404)
+    new_val = 0 if (row_get(server, "is_public") or 0) == 1 else 1
+    try:
+        db.execute(
+            "UPDATE servers SET is_public = ? WHERE id = ?",
+            (new_val, server_id),
+        )
+    except sqlite3.OperationalError:
+        pass
     db.commit()
     label = "公开" if new_val == 1 else "私有"
     flash(f"服务器已设为{label}", "success")
@@ -1662,22 +1898,54 @@ def server_toggle_public(server_id):
 @login_required
 def server_toggle_show_players(server_id):
     db = get_db()
+    _ensure_schema(db)
     server = db.execute(
         "SELECT * FROM servers WHERE id = ? AND user_id = ?",
         (server_id, session["user_id"]),
     ).fetchone()
     if not server:
         abort(404)
-    new_val = 0 if (server["show_players"] or 0) == 1 else 1
-    db.execute(
-        "UPDATE servers SET show_players = ? WHERE id = ?",
-        (new_val, server_id),
-    )
+    new_val = 0 if (row_get(server, "show_players", 1) or 0) == 1 else 1
+    try:
+        db.execute(
+            "UPDATE servers SET show_players = ? WHERE id = ?",
+            (new_val, server_id),
+        )
+    except sqlite3.OperationalError:
+        pass
     db.commit()
     label = "显示玩家名" if new_val == 1 else "隐藏玩家名"
     flash(f"已{label}", "success")
     if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
         return jsonify({"ok": True, "show_players": bool(new_val), "id": server_id})
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/server/<int:server_id>/set-refresh-interval", methods=["POST"])
+@login_required
+def server_set_refresh_interval(server_id):
+    """修改服务器刷新间隔（秒）"""
+    interval_str = (request.form.get("refresh_interval") or "").strip()
+    try:
+        interval = int(interval_str)
+    except ValueError:
+        flash("刷新间隔无效", "error")
+        return redirect(url_for("dashboard"))
+    interval = max(10, min(3600, interval))
+    db = get_db()
+    _ensure_schema(db)
+    server = db.execute(
+        "SELECT * FROM servers WHERE id = ? AND user_id = ?",
+        (server_id, session["user_id"]),
+    ).fetchone()
+    if not server:
+        abort(404)
+    try:
+        db.execute("UPDATE servers SET refresh_interval = ? WHERE id = ?", (interval, server_id))
+    except sqlite3.OperationalError:
+        pass
+    db.commit()
+    flash(f"刷新间隔已设为 {interval} 秒", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -1696,17 +1964,20 @@ def group_add():
         flash("分组名称不能超过 32 个字符", "error")
         return redirect(url_for("dashboard"))
     db = get_db()
-    # 取最大 sort_order
-    max_order = db.execute(
+    _ensure_schema(db)
+    # 取最大 sort_order —— 如果旧数据库没有 server_groups 表，先创建
+    max_order_row = db.execute(
         "SELECT MAX(sort_order) FROM server_groups WHERE user_id = ?",
         (session["user_id"],)
-    ).fetchone()[0] or 0
+    ).fetchone()
+    max_order = (max_order_row[0] if max_order_row and max_order_row[0] is not None else 0)
     db.execute(
         "INSERT INTO server_groups (user_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
         (session["user_id"], name[:32], max_order + 1,
          datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
     )
     db.commit()
+    _audit("group_add", f"created group: {name}")
     flash(f"已创建分组：{name}", "success")
     return redirect(url_for("dashboard"))
 
@@ -1723,6 +1994,7 @@ def group_rename(group_id):
         flash("分组名称不能超过 32 个字符", "error")
         return redirect(url_for("dashboard"))
     db = get_db()
+    _ensure_schema(db)
     grp = db.execute(
         "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
         (group_id, session["user_id"]),
@@ -1734,6 +2006,7 @@ def group_rename(group_id):
         (name[:32], group_id),
     )
     db.commit()
+    _audit("group_rename", f"renamed group to: {name}")
     flash(f"分组已重命名为：{name}", "success")
     return redirect(url_for("dashboard"))
 
@@ -1743,18 +2016,23 @@ def group_rename(group_id):
 def group_delete(group_id):
     """删除分组（组内服务器移至未分组）"""
     db = get_db()
+    _ensure_schema(db)
     grp = db.execute(
         "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
         (group_id, session["user_id"]),
     ).fetchone()
     if not grp:
         abort(404)
-    db.execute(
-        "UPDATE servers SET group_id = NULL WHERE group_id = ?",
-        (group_id,),
-    )
+    try:
+        db.execute(
+            "UPDATE servers SET group_id = NULL WHERE group_id = ?",
+            (group_id,),
+        )
+    except sqlite3.OperationalError:
+        pass
     db.execute("DELETE FROM server_groups WHERE id = ?", (group_id,))
     db.commit()
+    _audit("group_delete", f"deleted group: {grp['name']}")
     flash(f"分组 {grp['name']} 已删除（服务器已移至未分组）", "success")
     return redirect(url_for("dashboard"))
 
@@ -1770,6 +2048,7 @@ def group_set_order(group_id):
         flash("顺序值无效", "error")
         return redirect(url_for("dashboard"))
     db = get_db()
+    _ensure_schema(db)
     grp = db.execute(
         "SELECT * FROM server_groups WHERE id = ? AND user_id = ?",
         (group_id, session["user_id"]),
@@ -1790,6 +2069,7 @@ def server_set_group(server_id):
     """修改服务器所属分组"""
     group_id_str = (request.form.get("group_id") or "").strip()
     db = get_db()
+    _ensure_schema(db)
     server = db.execute(
         "SELECT * FROM servers WHERE id = ? AND user_id = ?",
         (server_id, session["user_id"]),
@@ -1806,12 +2086,15 @@ def server_set_group(server_id):
             ).fetchone()
             if grp:
                 group_id = gid
-        except ValueError:
+        except (ValueError, sqlite3.OperationalError):
             pass
-    db.execute(
-        "UPDATE servers SET group_id = ? WHERE id = ?",
-        (group_id, server_id),
-    )
+    try:
+        db.execute(
+            "UPDATE servers SET group_id = ? WHERE id = ?",
+            (group_id, server_id),
+        )
+    except sqlite3.OperationalError:
+        pass
     db.commit()
     flash("服务器分组已更新", "success")
     return redirect(url_for("dashboard"))
@@ -1838,10 +2121,10 @@ def api_public_status():
     total_players = 0
     total_online = 0
     for s in servers:
-        protocol = s.get("protocol") or "java"
+        protocol = row_get(s, "protocol", "java") or "java"
         info = ping_server(s["host"], s["port"], protocol=protocol, timeout=5.0)
         online = bool(info.get("online", False))
-        show_players = bool(s["show_players"])
+        show_players = bool(row_get(s, "show_players", 1))
         entry = {
             "id": s["id"],
             "name": s["name"],
@@ -1856,7 +2139,7 @@ def api_public_status():
             "motd": info.get("motd") or "",
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
-            "owner_name": s["owner_name"],
+            "owner_name": row_get(s, "owner_name", "") or "",
             "checked_at": datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
@@ -1916,20 +2199,20 @@ def api_status():
 
     results = []
     for s in servers:
-        protocol = s.get("protocol") or "java"
+        protocol = row_get(s, "protocol", "java") or "java"
         info = ping_server(s["host"], s["port"], protocol=protocol, timeout=10.0)
         online = bool(info.get("online", False))
-        show_players = bool(s["show_players"])
+        show_players = bool(row_get(s, "show_players", 1))
         entry = {
             "id": s["id"],
             "name": s["name"],
             "host": s["host"],
             "port": s["port"],
             "protocol": protocol,
-            "is_public": bool(s["is_public"]),
+            "is_public": bool(row_get(s, "is_public", 0)),
             "show_players": show_players,
-            "group_id": s["group_id"],
-            "group_name": s["group_name"],
+            "group_id": row_get(s, "group_id"),
+            "group_name": row_get(s, "group_name"),
             "online": online,
             "version": info.get("version") or "",
             "players_online": info.get("players_online"),
@@ -2169,20 +2452,20 @@ def minekuai_me():
         (session["user_id"],),
     ).fetchone()
     servers = db.execute(
-        "SELECT id, name, host, port, minekuai_instance_id FROM servers WHERE user_id = ?",
+        "SELECT * FROM servers WHERE user_id = ?",
         (session["user_id"],),
     ).fetchall()
     return jsonify({
         "user_id": user["id"],
         "username": user["username"],
-        "has_minekuai_key": bool(user["minekuai_api_key"]),
+        "has_minekuai_key": bool(row_get(user, "minekuai_api_key")),
         "servers": [
             {
                 "id": s["id"],
                 "name": s["name"],
                 "host": s["host"],
                 "port": s["port"],
-                "minekuai_instance_id": s["minekuai_instance_id"],
+                "minekuai_instance_id": row_get(s, "minekuai_instance_id"),
             }
             for s in servers
         ],
@@ -2249,7 +2532,7 @@ def _get_server_for_minekuai(server_id: int):
         return None, (404, {
             "errors": [{"code": "NotFound", "status": "404", "detail": "未找到该服务器"}]
         })
-    if not server["minekuai_instance_id"]:
+    if not row_get(server, "minekuai_instance_id"):
         return None, (400, {
             "errors": [{
                 "code": "InstanceIdMissing",
@@ -2284,7 +2567,7 @@ def api_minekuai_server_power(server_id):
                 "detail": "signal 必须为 start / stop / restart / kill 中的一个。",
             }]
         }), 400
-    instance_id = server["minekuai_instance_id"]
+    instance_id = row_get(server, "minekuai_instance_id", "")
     status, body = _minekuai_proxy(
         "POST", f"/servers/{instance_id}/power", api_key, json_body={"signal": signal}
     )
@@ -2312,7 +2595,7 @@ def api_minekuai_server_command(server_id):
                 "detail": "命令内容不能为空。",
             }]
         }), 400
-    instance_id = server["minekuai_instance_id"]
+    instance_id = row_get(server, "minekuai_instance_id", "")
     status, body = _minekuai_proxy(
         "POST", f"/servers/{instance_id}/command", api_key, json_body={"command": command}
     )
@@ -2329,7 +2612,7 @@ def api_minekuai_server_resources(server_id):
         return jsonify(body), status
     server, api_key = result
 
-    instance_id = server["minekuai_instance_id"]
+    instance_id = row_get(server, "minekuai_instance_id", "")
     status, body = _minekuai_proxy(
         "GET", f"/servers/{instance_id}/resources", api_key
     )
@@ -2346,7 +2629,7 @@ def api_minekuai_server_details(server_id):
         return jsonify(body), status
     server, api_key = result
 
-    instance_id = server["minekuai_instance_id"]
+    instance_id = row_get(server, "minekuai_instance_id", "")
     status, body = _minekuai_proxy(
         "GET", f"/servers/{instance_id}", api_key
     )
@@ -2486,9 +2769,8 @@ def _poll_all_servers():
         db.execute("PRAGMA foreign_keys = ON")
 
         # 获取所有需要采集的服务器
-        servers = db.execute(
-            "SELECT s.id, s.host, s.port, s.user_id, s.name, s.protocol FROM servers s"
-        ).fetchall()
+        # 用 SELECT * 而非显式列，避免旧数据库缺列（protocol/group_id 等）导致查询崩溃
+        servers = db.execute("SELECT * FROM servers").fetchall()
 
         if not servers:
             return
@@ -2496,7 +2778,7 @@ def _poll_all_servers():
         def poll_one(server_row):
             """对单个服务器执行 ping，返回结果 dict（含 user_id/name 用于告警）"""
             try:
-                protocol = server_row.get("protocol") or "java"
+                protocol = row_get(server_row, "protocol", "java") or "java"
                 info = ping_server(server_row["host"], server_row["port"], protocol=protocol, timeout=5.0)
                 return {
                     "server_id": server_row["id"],
@@ -2894,4 +3176,15 @@ if __name__ == "__main__":
     # 启动后台定时采集调度器
     _start_scheduler()
 
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    host = os.environ.get("MCMONITOR_HOST", "0.0.0.0")
+    port = int(os.environ.get("MCMONITOR_PORT", "5000"))
+
+    if IS_PRODUCTION:
+        try:
+            from waitress import serve
+            serve(app, host=host, port=port, threads=4)
+        except ImportError:
+            print("WARNING: waitress not installed, falling back to Flask dev server")
+            app.run(host=host, port=port, debug=False, use_reloader=False)
+    else:
+        app.run(host=host, port=port, debug=False, use_reloader=False)

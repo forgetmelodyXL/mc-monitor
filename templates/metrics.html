@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>监控指标 - MC 服务器监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="dashboard-body">
+{% set _ = get_flashed_messages(with_categories=true) %}
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline btn-sm">仪表盘</a>
+            <a href="{{ url_for('admin_panel') }}" class="btn btn-outline btn-sm">管理后台</a>
+            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline btn-sm">退出</a>
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <section class="stats-row">
+        <div class="stat-card stat-online">
+            <div class="stat-label">总检查次数</div>
+            <div class="stat-value">{{ total_checks }}</div>
+        </div>
+        <div class="stat-card stat-online">
+            <div class="stat-label">在线次数</div>
+            <div class="stat-value">{{ online_checks }}</div>
+        </div>
+        <div class="stat-card {% if success_rate >= 95 %}stat-online{% elif success_rate >= 80 %}stat-players{% else %}stat-offline{% endif %}">
+            <div class="stat-label">成功率</div>
+            <div class="stat-value">{{ success_rate }}%</div>
+        </div>
+        <div class="stat-card stat-players">
+            <div class="stat-label">平均延迟</div>
+            <div class="stat-value">{{ avg_latency }}ms</div>
+        </div>
+        <div class="stat-card stat-players">
+            <div class="stat-label">24h 检查数</div>
+            <div class="stat-value">{{ check_count_24h }}</div>
+        </div>
+        <div class="stat-card {% if fail_count_24h == 0 %}stat-online{% else %}stat-offline{% endif %}">
+            <div class="stat-label">24h 失败数</div>
+            <div class="stat-value">{{ fail_count_24h }}</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>服务器状态概览</h2>
+        </div>
+        {% if servers %}
+        <div class="admin-table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>服务器</th>
+                        <th>地址</th>
+                        <th>协议</th>
+                        <th>所属用户</th>
+                        <th>状态</th>
+                        <th>玩家</th>
+                        <th>延迟</th>
+                        <th>最后检查</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in servers %}
+                    <tr>
+                        <td>{{ s.name }}</td>
+                        <td>{{ s.host }}:{{ s.port }}</td>
+                        <td><span class="badge">{{ s.protocol }}</span></td>
+                        <td>{{ s.username }}</td>
+                        <td>
+                            {% if s.online == 1 %}
+                            <span class="status-badge online">在线</span>
+                            {% elif s.online == 0 %}
+                            <span class="status-badge offline">离线</span>
+                            {% else %}
+                            <span class="status-badge unknown">未知</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ s.players or '-' }}</td>
+                        <td>{{ s.latency if s.latency is not none else '-' }}ms</td>
+                        <td>{{ s.last_check or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">--</div>
+            <p>暂无服务器数据</p>
+        </div>
+        {% endif %}
+    </section>
+
+    {% if recent_fails %}
+    <section class="card">
+        <div class="card-header">
+            <h2>最近失败记录</h2>
+        </div>
+        <div class="admin-table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>服务器</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in recent_fails %}
+                    <tr>
+                        <td>{{ f.name }}</td>
+                        <td>{{ f.checked_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</main>
+</body>
+</html>

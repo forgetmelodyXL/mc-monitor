@@ -1,4 +1,4 @@
-﻿
+
 @echo off
 @echo off
 chcp 65001 >nul
@@ -35,9 +35,9 @@ for /f "tokens=2 delims= " %%i in ('python -V 2^>^&1') do set PY_VER=%%i
 echo [INFO] Python version detected: %PY_VER%
 echo.
 
-echo [1/5] Install / update dependencies (Flask + requests + APScheduler + PyInstaller) ...
+echo [1/5] Install / update dependencies (Flask + requests + APScheduler + waitress + PyInstaller) ...
 python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple --disable-pip-version-check >nul 2>nul
-python -m pip install --disable-pip-version-check -i https://pypi.tuna.tsinghua.edu.cn/simple flask requests APScheduler pyinstaller
+python -m pip install --disable-pip-version-check -i https://pypi.tuna.tsinghua.edu.cn/simple flask requests APScheduler waitress pyinstaller
 if errorlevel 1 (
     echo [ERROR] Dependency install failed. Check your network.
     pause

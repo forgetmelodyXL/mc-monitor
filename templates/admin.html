@@ -8,15 +8,7 @@
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        <div class="flash-container">
-            {% for category, message in messages %}
-                <div class="flash flash-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        </div>
-    {% endif %}
-{% endwith %}
+{% set _ = get_flashed_messages(with_categories=true) %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -27,6 +19,7 @@
         <div class="topbar-right">
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <span class="user-tag">{{ current_username }} · 管理员</span>
+            <a href="{{ url_for('metrics') }}" class="btn btn-sm btn-outline">监控指标</a>
             <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline">公共主页</a>
             <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">我的管理</a>
             <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">退出</a>
@@ -198,16 +191,18 @@
                         <td>{{ u.id }}</td>
                         <td>
                             <strong>{{ u.username }}</strong>
-                            {% if u.username == 'admin' %}
-                                <span class="badge badge-default">默认管理员</span>
-                            {% elif u.is_admin %}
+                            {% if u.role == 'super_admin' %}
+                                <span class="badge badge-super">超级管理员</span>
+                            {% elif u.role == 'admin' %}
                                 <span class="badge badge-admin">管理员</span>
+                            {% elif u.role == 'moderator' %}
+                                <span class="badge badge-mod">协管员</span>
                             {% else %}
                                 <span class="badge badge-user">普通用户</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if u.is_admin %}管理员{% else %}普通用户{% endif %}
+                            <span class="role-label">{{ u.role_label }}</span>
                         </td>
                         <td>{{ u.server_count }}</td>
                         <td>{{ u.created_at }}</td>
@@ -222,8 +217,19 @@
                                 <button type="submit" class="btn btn-sm">重置密码</button>
                             </form>
 
-                            <!-- 切换管理员身份 (不能操作默认 admin) -->
-                            {% if u.username != 'admin' %}
+                            <!-- 角色管理 (不能操作默认 admin 的角色) -->
+                            {% if u.username != 'admin' and session.get('role') == 'super_admin' %}
+                            <form method="POST" action="{{ url_for('admin_set_role', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
+                                {{ csrf_input() }}
+                                <select name="role" style="padding: 4px;">
+                                    <option value="user" {% if u.role == 'user' %}selected{% endif %}>普通用户</option>
+                                    <option value="moderator" {% if u.role == 'moderator' %}selected{% endif %}>协管员</option>
+                                    <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>管理员</option>
+                                    <option value="super_admin" {% if u.role == 'super_admin' %}selected{% endif %}>超级管理员</option>
+                                </select>
+                                <button type="submit" class="btn btn-sm">设置角色</button>
+                            </form>
+                            {% elif u.username != 'admin' %}
                             <form method="POST" action="{{ url_for('admin_toggle_admin', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
                                 {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm">

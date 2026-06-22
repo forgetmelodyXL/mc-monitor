@@ -6,18 +6,11 @@
     <title>仪表盘 - MC 服务器监控</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        <div class="flash-container">
-            {% for category, message in messages %}
-                <div class="flash flash-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        </div>
-    {% endif %}
-{% endwith %}
+{% set _ = get_flashed_messages(with_categories=true) %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -77,24 +70,20 @@
             <h2>🗂 服务器分组</h2>
         </div>
         <div class="groups-manager" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
-            <!-- 创建新分组 -->
             <form method="POST" action="{{ url_for('group_add') }}" style="display: flex; gap: 8px; align-items: center;">
                 {{ csrf_input() }}
                 <input type="text" name="name" placeholder="新分组名称" maxlength="32" style="padding: 6px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px; width: 160px;">
                 <button type="submit" class="btn btn-sm" style="background: #6c8dff; color: white;">+ 创建分组</button>
             </form>
-            <!-- 已有分组列表 -->
             {% for g in groups %}
             <div class="group-tag" style="display: flex; align-items: center; gap: 6px; background: #eef1f7; border: 1px solid #d0d6e8; border-radius: 8px; padding: 5px 10px; font-size: 13px;">
                 <span style="font-weight: 500;">📁 {{ g.name }}</span>
                 <span style="color: #8a8fa6; font-size: 12px;">({{ servers|selectattr('group_id')|list|length if false }})</span>
-                <!-- 重命名 -->
                 <form method="POST" action="{{ url_for('group_rename', group_id=g.id) }}" style="display: inline-flex; gap: 4px;">
                     {{ csrf_input() }}
                     <input type="text" name="name" value="{{ g.name }}" maxlength="32" style="padding: 3px 6px; border: 1px solid #c0c6e0; border-radius: 4px; font-size: 12px; width: 100px;">
                     <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #4caf50; color: white;">改</button>
                 </form>
-                <!-- 删除 -->
                 <form method="POST" action="{{ url_for('group_delete', group_id=g.id) }}" onsubmit="return confirm('确定删除分组 {{ g.name }}？服务器将移至未分组。');" style="display: inline;">
                     {{ csrf_input() }}
                     <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #e44; color: white;">删</button>
@@ -251,149 +240,112 @@
         </div>
 
         {% if servers %}
-        <div class="server-grid" id="serverGrid">
-            {% for s in servers %}
-            <div class="server-card" data-server-id="{{ s.id }}"
-                 data-initial-public="{% if s.is_public %}1{% else %}0{% endif %}"
-                 data-initial-show-players="{% if s.show_players %}1{% else %}0{% endif %}">
-                <div class="server-card-header">
-                    <div>
-                        <h3 class="server-name">{{ s.name }}</h3>
-                        <div class="server-host">{{ s.host }}:{{ s.port }}</div>
-                        <div class="server-owner-tag visibility-label">
-                            {% if s.is_public %}公开 · 任何人可在主页看到{% else %}私有 · 仅自己可见{% endif %}
-                            <span class="protocol-badge" style="margin-left: 6px; background: #6c8dff; color: white; padding: 1px 6px; border-radius: 4px; font-size: 11px;">{{ s.protocol|upper }}</span>
-                        </div>
-                    </div>
-                    <div class="server-status status-loading">检测中…</div>
-                </div>
-                <div class="server-meta">
-                    <div class="meta-item"><span class="meta-label">版本</span><span class="meta-value meta-version">—</span></div>
-                    <div class="meta-item"><span class="meta-label">玩家</span><span class="meta-value meta-players">—</span></div>
-                    <div class="meta-item"><span class="meta-label">延迟</span><span class="meta-value meta-latency">—</span></div>
-                    <div class="meta-item">
-                        <span class="meta-label">分组</span>
-                        <form method="POST" action="{{ url_for('server_set_group', server_id=s.id) }}" style="display: inline; margin-left: 4px;" class="group-set-form">
-                            {{ csrf_input() }}
-                            <select name="group_id" style="padding: 2px 5px; border: 1px solid #d0d6e8; border-radius: 4px; font-size: 12px; min-width: 90px;"
-                                    onchange="this.form.submit()">
-                                <option value="">— 无分组 —</option>
-                                {% for g in groups %}
-                                <option value="{{ g.id }}" {% if s.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </form>
-                    </div>
-                </div>
-                <div class="server-motd">
-                    <span class="meta-label">MOTD / 描述</span>
-                    <div class="motd-content">—</div>
-                </div>
-                <div class="server-players hidden">
-                    <span class="meta-label">在线玩家</span>
-                    <div class="players-list"></div>
-                </div>
-                <div class="server-error hidden"></div>
-
-                <!-- 历史图表区域 -->
-                <div class="server-chart-box hidden" data-server-id="{{ s.id }}">
-                    <div class="server-chart-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                        <span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>
-                        <button type="button" class="btn btn-sm btn-chart-close" data-server-id="{{ s.id }}" style="padding: 2px 8px; font-size: 12px;">收起</button>
-                    </div>
-                    <div style="position: relative; height: 160px;">
-                        <canvas class="server-chart" data-server-id="{{ s.id }}"></canvas>
-                    </div>
-                </div>
-
-                <!-- 麦块联机控制区域 -->
-                <div class="minekuai-box">
-                    <div class="minekuai-box-header">
-                        <span class="minekuai-title">⚙ 麦块联机控制</span>
-                        <span class="hint minekuai-status-label" data-minekuai-bound-to="{{ s.minekuai_instance_id or '' }}">
-                            {% if s.minekuai_instance_id %}已绑定实例: {{ s.minekuai_instance_id }}{% else %}尚未绑定实例 ID{% endif %}
-                        </span>
-                    </div>
-
-                    <!-- 实例 ID 绑定表单 -->
-                    <form method="POST"
-                          action="{{ url_for('server_bind_minekuai_instance', server_id=s.id) }}"
-                          class="minekuai-bind-form"
-                          data-server-id="{{ s.id }}">
-                        {{ csrf_input() }}
-                        <div class="minekuai-bind-row">
-                            <label class="meta-label" style="min-width:auto;">实例 ID</label>
-                            <input type="text" name="instance_id"
-                                   value="{{ s.minekuai_instance_id or '' }}"
-                                   placeholder="如：xyz123abc"
-                                   class="input-sm">
-                            <button type="submit" class="btn btn-sm btn-minekuai-save">保存</button>
-                        </div>
-                    </form>
-
-                    <!-- 操作按钮：仅当有绑定实例时才可用 -->
-                    <div class="minekuai-actions">
-                        <button type="button" class="btn btn-sm btn-minekuai-power"
-                                data-action="start"
-                                data-server-id="{{ s.id }}">启动</button>
-                        <button type="button" class="btn btn-sm btn-minekuai-power"
-                                data-action="restart"
-                                data-server-id="{{ s.id }}">重启</button>
-                        <button type="button" class="btn btn-sm btn-minekuai-power"
-                                data-action="stop"
-                                data-server-id="{{ s.id }}">停止</button>
-                        <button type="button" class="btn btn-sm btn-minekuai-power btn-minekuai-danger"
-                                data-action="kill"
-                                data-server-id="{{ s.id }}">强制关闭</button>
-                        <button type="button" class="btn btn-sm btn-minekuai-secondary"
-                                data-action="resources"
-                                data-server-id="{{ s.id }}">资源</button>
-                    </div>
-
-                    <!-- 命令发送 -->
-                    <form class="minekuai-cmd-form" data-server-id="{{ s.id }}" onsubmit="return false;">
-                        <div class="minekuai-bind-row">
-                            <input type="text" name="command" placeholder="发送到服务器控制台，如: help" class="input-sm cmd-input" autocomplete="off">
-                            <button type="submit" class="btn btn-sm btn-primary">执行</button>
-                        </div>
-                    </form>
-
-                    <!-- 响应展示 -->
-                    <pre class="minekuai-output hidden"></pre>
-                </div>
-
-                <div class="server-actions">
-                    <button type="button" class="btn btn-sm btn-show-chart"
-                            data-server-id="{{ s.id }}"
-                            style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
-                        📈 查看图表
-                    </button>
-                    <form method="POST"
-                          action="{{ url_for('server_toggle_public', server_id=s.id) }}"
-                          class="public-toggle-form"
-                          data-server-id="{{ s.id }}">
-                        {{ csrf_input() }}
-                        <button type="submit" class="btn btn-sm btn-public-toggle">
-                            {% if s.is_public %}🔓 已公开 · 点击设为私有{% else %}🔒 已私有 · 点击设为公开{% endif %}
-                        </button>
-                    </form>
-                    <form method="POST"
-                          action="{{ url_for('server_toggle_show_players', server_id=s.id) }}"
-                          class="show-players-toggle-form"
-                          data-server-id="{{ s.id }}">
-                        {{ csrf_input() }}
-                        <button type="submit" class="btn btn-sm btn-show-players-toggle">
-                            {% if s.show_players %}👁 显示玩家名中 · 点击隐藏{% else %}🙈 已隐藏玩家名 · 点击显示{% endif %}
-                        </button>
-                    </form>
-                    <form method="POST" action="{{ url_for('server_delete', server_id=s.id) }}"
-                          onsubmit="return confirm('确定删除该服务器？');">
-                        {{ csrf_input() }}
-                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
-                    </form>
-                </div>
-            </div>
-            {% endfor %}
+        <div class="server-table-wrap">
+            <table class="server-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>名称</th>
+                        <th>地址</th>
+                        <th>协议</th>
+                        <th>状态</th>
+                        <th>玩家</th>
+                        <th>延迟</th>
+                        <th>分组</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="serverTableBody">
+                    {% for s in servers %}
+                    <tr class="server-row" data-server-id="{{ s.id }}"
+                        data-initial-public="{% if s.is_public %}1{% else %}0{% endif %}"
+                        data-initial-show-players="{% if s.show_players %}1{% else %}0{% endif %}"
+                        data-host="{{ s.host }}"
+                        data-port="{{ s.port }}"
+                        data-protocol="{{ s.protocol }}"
+                        data-minekuai-instance-id="{{ s.minekuai_instance_id or '' }}">
+                        <td class="drag-handle" title="拖动排序">≡</td>
+                        <td>
+                            <div class="server-name-cell">{{ s.name }}</div>
+                            <span class="motd-content hidden" style="display:none;">—</span>
+                            <span class="visibility-label hidden" style="display:none;">{% if s.is_public %}公开 · 任何人可在主页看到{% else %}私有 · 仅自己可见{% endif %}</span>
+                        </td>
+                        <td><span class="server-addr-cell">{{ s.host }}:{{ s.port }}</span></td>
+                        <td><span class="protocol-badge">{{ s.protocol|upper }}</span></td>
+                        <td>
+                            <span class="server-status status-loading">检测中…</span>
+                            <span class="meta-version hidden" style="display:none;">—</span>
+                        </td>
+                        <td class="meta-players">—</td>
+                        <td class="meta-latency">—</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('server_set_group', server_id=s.id) }}" style="display: inline;" class="group-set-form">
+                                {{ csrf_input() }}
+                                <select name="group_id" style="padding: 4px 6px; border: 1px solid #d0d6e8; border-radius: 4px; font-size: 12px; min-width: 90px;"
+                                        onchange="this.form.submit()">
+                                    <option value="">— 无分组 —</option>
+                                    {% for g in groups %}
+                                    <option value="{{ g.id }}" {% if s.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+                        </td>
+                        <td>
+                            <div class="server-actions-cell">
+                                <button type="button" class="btn btn-sm btn-edit-server"
+                                        data-server-id="{{ s.id }}"
+                                        style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
+                                    ✏️ 编辑
+                                </button>
+                                <button type="button" class="btn btn-sm btn-minekuai-open"
+                                        data-server-id="{{ s.id }}"
+                                        style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
+                                    ⚙ 麦块控制
+                                </button>
+                                <button type="button" class="btn btn-sm btn-show-chart"
+                                        data-server-id="{{ s.id }}"
+                                        style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
+                                    📈 图表
+                                </button>
+                                <form method="POST"
+                                      action="{{ url_for('server_toggle_public', server_id=s.id) }}"
+                                      class="public-toggle-form"
+                                      data-server-id="{{ s.id }}">
+                                    {{ csrf_input() }}
+                                    <button type="submit" class="btn btn-sm btn-public-toggle">
+                                        {% if s.is_public %}🔓 公开{% else %}🔒 私有{% endif %}
+                                    </button>
+                                </form>
+                                <button type="button" class="btn btn-sm btn-show-players"
+                                        data-server-id="{{ s.id }}"
+                                        style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8;">
+                                    👥 玩家
+                                </button>
+                                <form method="POST" action="{{ url_for('server_delete', server_id=s.id) }}"
+                                      onsubmit="return confirm('确定删除该服务器？');">
+                                    {{ csrf_input() }}
+                                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- 图表行（默认隐藏） -->
+                    <tr class="chart-row hidden" data-server-id="{{ s.id }}">
+                        <td colspan="9">
+                            <div class="server-chart-box">
+                                <div class="server-chart-header">
+                                    <span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>
+                                    <button type="button" class="btn btn-sm btn-chart-close" data-server-id="{{ s.id }}" style="padding: 2px 8px; font-size: 12px;">收起</button>
+                                </div>
+                                <div style="position: relative; height: 160px;">
+                                    <canvas class="server-chart" data-server-id="{{ s.id }}"></canvas>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% else %}
         <div class="empty-state">
@@ -403,6 +355,119 @@
     </section>
 </main>
 
+<!-- ========== 在线玩家模态框 ========== -->
+<div class="modal-overlay hidden" id="playersModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="playersModalTitle">在线玩家</h3>
+            <button type="button" class="modal-close" id="playersModalClose">✕</button>
+        </div>
+        <div class="modal-body">
+            <div id="playersListContainer" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;">
+                <span style="color: #8a8fa6;">暂无玩家数据</span>
+            </div>
+            <div style="border-top: 1px solid #e6e8f3; padding-top: 12px; display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                    <div style="font-size: 13px; color: #2a2e5b; font-weight: 600;">公共页面显示玩家</div>
+                    <div style="font-size: 11px; color: #8a8fa6; margin-top: 2px;">关闭后，在公共服务器页面将不显示玩家具体名字，仅显示在线/离线状态</div>
+                </div>
+                <form id="showPlayersToggleForm" method="POST" action="" style="margin: 0;">
+                    {{ csrf_input() }}
+                    <button type="submit" class="btn btn-sm" id="showPlayersToggleBtn" style="background: #eef1f7; color: #2a2e5b; border: 1px solid #d0d6e8; min-width: 80px;">
+                        正在…
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" id="playersCancelBtn">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- ========== 编辑服务器模态框 ========== -->
+<div class="modal-overlay hidden" id="editModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>编辑服务器</h3>
+            <button type="button" class="modal-close" id="editModalClose">✕</button>
+        </div>
+        <div class="modal-body">
+            <form id="editForm" method="POST" action="">
+                {{ csrf_input() }}
+                <div class="form-group">
+                    <label>名称</label>
+                    <input type="text" name="name" id="editName" required maxlength="64" placeholder="服务器名称">
+                </div>
+                <div class="form-group">
+                    <label>地址 (Host)</label>
+                    <input type="text" name="host" id="editHost" required maxlength="253" placeholder="地址">
+                </div>
+                <div class="form-group">
+                    <label>端口</label>
+                    <input type="number" name="port" id="editPort" min="1" max="65535" required placeholder="端口">
+                </div>
+                <div class="form-group">
+                    <label>协议</label>
+                    <select name="protocol" id="editProtocol">
+                        <option value="java">Java</option>
+                        <option value="bedrock">Bedrock</option>
+                        <option value="http">HTTP(s)</option>
+                        <option value="tcp">TCP</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="editSaveBtn">保存</button>
+            <button type="button" class="btn btn-outline" id="editCancelBtn">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- ========== 麦块联机控制模态框 ========== -->
+<div class="modal-overlay hidden" id="minekuaiModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>⚙ 麦块联机控制</h3>
+            <button type="button" class="modal-close" id="minekuaiModalClose">✕</button>
+        </div>
+        <div class="modal-body">
+            <div id="mkServerName" style="font-weight: 600; color: #2a2e5b; font-size: 15px; margin-bottom: 10px;">—</div>
+            <div class="mk-status-label" id="mkStatusLabel">尚未绑定实例 ID</div>
+
+            <!-- 实例 ID 绑定 -->
+            <form id="mkBindForm" onsubmit="return false;" class="mk-bind-row">
+                {{ csrf_input() }}
+                <label class="meta-label" style="min-width: auto; margin-right: 4px;">实例 ID</label>
+                <input type="text" name="instance_id" id="mkInstanceId" placeholder="如：xyz123abc" class="input-sm" style="flex: 1;">
+                <button type="submit" class="btn btn-sm btn-minekuai-save" id="mkBindBtn">保存</button>
+            </form>
+
+            <!-- 电源按钮 -->
+            <div class="mk-actions-row">
+                <button type="button" class="btn btn-sm btn-minekuai-power" data-action="start" id="mkPowerStart">启动</button>
+                <button type="button" class="btn btn-sm btn-minekuai-power" data-action="restart" id="mkPowerRestart">重启</button>
+                <button type="button" class="btn btn-sm btn-minekuai-power" data-action="stop" id="mkPowerStop">停止</button>
+                <button type="button" class="btn btn-sm btn-minekuai-power btn-minekuai-danger" data-action="kill" id="mkPowerKill">强制关闭</button>
+                <button type="button" class="btn btn-sm btn-minekuai-secondary" data-action="resources" id="mkResources">资源</button>
+            </div>
+
+            <!-- 命令发送 -->
+            <form id="mkCmdForm" onsubmit="return false;" class="mk-cmd-row">
+                <input type="text" name="command" id="mkCmdInput" placeholder="发送到服务器控制台，如: help" class="input-sm" autocomplete="off" style="flex: 1;">
+                <button type="submit" class="btn btn-sm btn-primary">执行</button>
+            </form>
+
+            <!-- 响应展示 -->
+            <pre class="mk-output hidden" id="mkOutput"></pre>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" id="mkCancelBtn">关闭</button>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     const API_STATUS = "{{ url_for('api_status') }}";
@@ -410,14 +475,15 @@
     const refreshBtn = document.getElementById('refreshBtn');
     const autoRefreshEl = document.getElementById('autoRefresh');
     const lastRefreshEl = document.getElementById('lastRefresh');
-    const FRONTEND_TIMEOUT_MS = 18000; // 硬性前端超时：后端 15s + 3s 网络缓冲
+    const FRONTEND_TIMEOUT_MS = 18000;
     let autoTimer = null;
-    let currentTestController = null; // 测试按钮用的 AbortController，支持中途取消
+    let currentTestController = null;
 
     function fmtTime(d) {
         return d.toLocaleString('zh-CN', { hour12: false });
     }
 
+    // ---- 更新表格行数据 ----
     function updateCards(data) {
         document.getElementById('statTotal').textContent = data.total;
         document.getElementById('statOnline').textContent = data.online;
@@ -427,82 +493,64 @@
         const byId = {};
         (data.servers || []).forEach(s => { byId[s.id] = s; });
 
-        document.querySelectorAll('.server-card').forEach(card => {
-            const id = parseInt(card.dataset.serverId, 10);
+        document.querySelectorAll('.server-row').forEach(row => {
+            const id = parseInt(row.dataset.serverId, 10);
             const info = byId[id];
             if (!info) return;
 
             // 在线状态
-            const statusEl = card.querySelector('.server-status');
-            const errEl = card.querySelector('.server-error');
+            const statusEl = row.querySelector('.server-status');
             if (info.online) {
                 statusEl.className = 'server-status status-online';
                 statusEl.textContent = '● 在线';
-                errEl.classList.add('hidden');
-                errEl.textContent = '';
             } else {
                 statusEl.className = 'server-status status-offline';
                 statusEl.textContent = '● 离线';
-                if (info.error) {
-                    errEl.textContent = '错误: ' + info.error;
-                    errEl.classList.remove('hidden');
-                } else {
-                    errEl.classList.add('hidden');
-                }
             }
 
-            card.querySelector('.meta-version').textContent = info.version || '—';
+            // 版本
+            const verEl = row.querySelector('.meta-version');
+            if (verEl) verEl.textContent = info.version || '—';
+
+            // 玩家数
             const playersText = (info.players_online === null || info.players_online === undefined)
                 ? '—'
                 : info.players_online + ' / ' + (info.players_max ?? '?');
-            card.querySelector('.meta-players').textContent = playersText;
-            card.querySelector('.meta-latency').textContent =
+            row.querySelector('.meta-players').textContent = playersText;
+
+            // 延迟
+            row.querySelector('.meta-latency').textContent =
                 (info.latency_ms === null || info.latency_ms === undefined) ? '—' : info.latency_ms + ' ms';
 
-            const motd = card.querySelector('.motd-content');
-            motd.textContent = (info.online && info.motd) ? info.motd : '—';
+            // MOTD
+            const motd = row.querySelector('.motd-content');
+            if (motd) motd.textContent = (info.online && info.motd) ? info.motd : '—';
 
-            // 显示/隐藏玩家具体名单
-            const playersBox = card.querySelector('.server-players');
-            const playersList = card.querySelector('.players-list');
+            // 协议 badge
+            const protoBadge = row.querySelector('.protocol-badge');
+            if (protoBadge && info.protocol) protoBadge.textContent = info.protocol.toUpperCase();
+
+            // 显示/隐藏玩家具体名单（存储到 row 属性，供弹窗使用）
             const showPlayers = !!info.show_players;
-            if (playersBox) {
-                if (showPlayers && info.players_sample && info.players_sample.length) {
-                    playersList.innerHTML = '';
-                    info.players_sample.forEach(p => {
-                        const name = (typeof p === 'string') ? p : (p && p.name ? p.name : '');
-                        if (!name) return;
-                        const item = document.createElement('span');
-                        item.className = 'player-name-tag';
-                        item.textContent = name;
-                        playersList.appendChild(item);
-                    });
-                    playersBox.classList.remove('hidden');
-                } else {
-                    playersList.innerHTML = '';
-                    playersBox.classList.add('hidden');
-                }
+            if (showPlayers && info.players_sample && info.players_sample.length) {
+                row.dataset.playersSample = JSON.stringify(info.players_sample);
+                row.dataset.showPlayers = info.show_players ? '1' : '0';
+            } else {
+                delete row.dataset.playersSample;
+                row.dataset.showPlayers = info.show_players ? '1' : '0';
             }
 
             // 公开/私有状态
             const isPub = !!info.is_public;
-            card.dataset.initialPublic = isPub ? '1' : '0';
-            const visLabel = card.querySelector('.visibility-label');
+            row.dataset.initialPublic = isPub ? '1' : '0';
+            const visLabel = row.querySelector('.visibility-label');
             if (visLabel) {
                 visLabel.textContent = isPub ? '公开 · 任何人可在主页看到' : '私有 · 仅自己可见';
             }
-            const toggleBtn = card.querySelector('.btn-public-toggle');
+            const toggleBtn = row.querySelector('.btn-public-toggle');
             if (toggleBtn) {
-                toggleBtn.textContent = isPub ? '🔓 已公开 · 点击设为私有' : '🔒 已私有 · 点击设为公开';
-            }
-
-            // 显示/隐藏玩家名 的按钮文案同步
-            card.dataset.initialShowPlayers = showPlayers ? '1' : '0';
-            const showPlayersBtn = card.querySelector('.btn-show-players-toggle');
-            if (showPlayersBtn) {
-                showPlayersBtn.textContent = showPlayers
-                    ? '👁 显示玩家名中 · 点击隐藏'
-                    : '🙈 已隐藏玩家名 · 点击显示';
+                toggleBtn.textContent = isPub ? '🔓 公开' : '🔒 私有';
+                toggleBtn.title = isPub ? '已公开 · 点击设为私有' : '已私有 · 点击设为公开';
             }
         });
 
@@ -515,7 +563,7 @@
             ev.preventDefault();
             const url = form.action;
             const btn = form.querySelector('button');
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
+            if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
             try {
                 const formData = new FormData(form);
                 const res = await fetch(url, {
@@ -525,63 +573,20 @@
                 });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
-                // 立即更新卡片，而不用等下一轮刷新
                 const id = parseInt(form.dataset.serverId, 10);
-                const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-                if (card) {
+                const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
+                if (row) {
                     const isPub = !!data.is_public;
-                    card.dataset.initialPublic = isPub ? '1' : '0';
-                    const visLabel = card.querySelector('.visibility-label');
+                    row.dataset.initialPublic = isPub ? '1' : '0';
+                    const visLabel = row.querySelector('.visibility-label');
                     if (visLabel) visLabel.textContent = isPub ? '公开 · 任何人可在主页看到' : '私有 · 仅自己可见';
-                    if (btn) btn.textContent = isPub ? '🔓 已公开 · 点击设为私有' : '🔒 已私有 · 点击设为公开';
-                }
-            } catch (e) {
-                // 失败则回退：走原生表单 POST 重定向
-                if (btn) btn.textContent = '⚠ 失败，重试中…';
-                form.submit();
-                return;
-            } finally {
-                if (btn) btn.disabled = false;
-            }
-        });
-    });
-
-    // ---- 显示/隐藏玩家名 切换（AJAX） ----
-    document.querySelectorAll('.show-players-toggle-form').forEach(form => {
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            const url = form.action;
-            const btn = form.querySelector('button');
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ 切换中…'; }
-            try {
-                const formData = new FormData(form);
-                const res = await fetch(url, {
-                    method: 'POST',
-                    body: formData,
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
-                const id = parseInt(form.dataset.serverId, 10);
-                const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-                if (card) {
-                    const showPlayers = !!data.show_players;
-                    card.dataset.initialShowPlayers = showPlayers ? '1' : '0';
-                    // 若无列表数据或未开启，隐藏
-                    const playersBox = card.querySelector('.server-players');
-                    const playersList = card.querySelector('.players-list');
-                    if (!showPlayers && playersBox) {
-                        playersList.innerHTML = '';
-                        playersBox.classList.add('hidden');
-                    }
                     if (btn) {
-                        btn.textContent = showPlayers
-                            ? '👁 显示玩家名中 · 点击隐藏'
-                            : '🙈 已隐藏玩家名 · 点击显示';
+                        btn.textContent = isPub ? '🔓 公开' : '🔒 私有';
+                        btn.title = isPub ? '已公开 · 点击设为私有' : '已私有 · 点击设为公开';
                     }
                 }
             } catch (e) {
-                if (btn) btn.textContent = '⚠ 失败，重试中…';
+                if (btn) btn.textContent = '⚠';
                 form.submit();
                 return;
             } finally {
@@ -590,82 +595,214 @@
         });
     });
 
-    // ---- 麦块联机：实例 ID 绑定 / 电源 / 命令 / 资源 ----
+    // ---- 在线玩家弹窗 ----
+    let currentPlayersServerId = null;
+
+    function renderShowPlayersToggleBtn(state) {
+        var btn = document.getElementById('showPlayersToggleBtn');
+        if (!btn) return;
+        if (state === 'loading') {
+            btn.textContent = '⟳';
+            btn.disabled = true;
+            btn.style.background = '#eef1f7';
+            btn.style.color = '#2a2e5b';
+            return;
+        }
+        btn.disabled = false;
+        if (state === 1 || state === '1' || state === true) {
+            btn.textContent = '● 已开启';
+            btn.style.background = '#e7f5ec';
+            btn.style.color = '#1e9e44';
+        } else {
+            btn.textContent = '○ 已关闭';
+            btn.style.background = '#eef1f7';
+            btn.style.color = '#2a2e5b';
+        }
+    }
+
+    document.querySelectorAll('.btn-show-players').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var sid = this.dataset.serverId;
+            currentPlayersServerId = sid;
+            var row = document.querySelector('.server-row[data-server-id="' + sid + '"]');
+            var playersData = row ? row.dataset.playersSample : null;
+            var showPlayers = row ? (row.dataset.showPlayers === '1') : true;
+            var container = document.getElementById('playersListContainer');
+            var title = document.getElementById('playersModalTitle');
+            var serverName = row ? row.querySelector('.server-name-cell').textContent : '服务器';
+            title.textContent = serverName + ' 在线玩家';
+
+            // 设置切换表单的 action
+            var form = document.getElementById('showPlayersToggleForm');
+            if (form) {
+                form.action = '/server/' + sid + '/toggle-show-players';
+            }
+            renderShowPlayersToggleBtn(showPlayers);
+
+            if (playersData) {
+                try {
+                    var players = JSON.parse(playersData);
+                    if (players.length) {
+                        container.innerHTML = players.map(function (p) {
+                            var name = (typeof p === 'string') ? p : (p && p.name ? p.name : '');
+                            return name ? '<span class="player-name-tag">' + escapeHtml(name) + '</span>' : '';
+                        }).join('');
+                    } else {
+                        container.innerHTML = '<span style="color: #8a8fa6;">当前没有玩家在线</span>';
+                    }
+                } catch (e) {
+                    container.innerHTML = '<span style="color: #8a8fa6;">暂无玩家数据</span>';
+                }
+            } else {
+                container.innerHTML = '<span style="color: #8a8fa6;">暂无玩家数据</span>';
+            }
+
+            document.getElementById('playersModal').classList.remove('hidden');
+        });
+    });
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // 公共页面显示玩家切换按钮
+    document.getElementById('showPlayersToggleForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        if (!currentPlayersServerId) return;
+        var btn = document.getElementById('showPlayersToggleBtn');
+        renderShowPlayersToggleBtn('loading');
+        try {
+            var formData = new FormData(this);
+            var res = await fetch('/server/' + currentPlayersServerId + '/toggle-show-players', {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+            // 更新行上的 showPlayers 属性
+            var row = document.querySelector('.server-row[data-server-id="' + currentPlayersServerId + '"]');
+            if (row) {
+                row.dataset.showPlayers = data.show_players ? '1' : '0';
+            }
+            renderShowPlayersToggleBtn(data.show_players ? '1' : '0');
+        } catch (e) {
+            // 如果 AJAX 失败，回退到普通表单提交
+            this.submit();
+        }
+    });
+
+    document.getElementById('playersModalClose').addEventListener('click', function () {
+        document.getElementById('playersModal').classList.add('hidden');
+    });
+    document.getElementById('playersCancelBtn').addEventListener('click', function () {
+        document.getElementById('playersModal').classList.add('hidden');
+    });
+    document.getElementById('playersModal').addEventListener('click', function (e) {
+        if (e.target === this) this.classList.add('hidden');
+    });
+
+    // ---- 麦块联机：API 辅助函数 ----
     const API_MINEKUAI_POWER = function (id) { return '/api/minekuai/servers/' + id + '/power'; };
     const API_MINEKUAI_CMD = function (id) { return '/api/minekuai/servers/' + id + '/command'; };
     const API_MINEKUAI_RES = function (id) { return '/api/minekuai/servers/' + id + '/resources'; };
 
-    function writeMinekuaiOutput(card, text) {
-        const box = card.querySelector('.minekuai-output');
+    function writeMkOutput(text) {
+        const box = document.getElementById('mkOutput');
         if (!box) return;
         box.textContent = text;
         if (text) box.classList.remove('hidden');
         else box.classList.add('hidden');
     }
 
-    function appendMinekuaiOutput(card, text) {
-        const box = card.querySelector('.minekuai-output');
+    function appendMkOutput(text) {
+        const box = document.getElementById('mkOutput');
         if (!box) return;
         box.textContent = (box.textContent ? box.textContent + '\n' : '') + text;
         box.classList.remove('hidden');
     }
 
-    // 实例 ID 绑定提交
-    document.querySelectorAll('.minekuai-bind-form').forEach(form => {
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            const url = form.action;
-            const input = form.querySelector('input[name="instance_id"]');
-            const btn = form.querySelector('button');
-            const id = parseInt(form.dataset.serverId, 10);
-            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-            const val = (input.value || '').trim();
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ 保存中…'; }
-            try {
-                const formData = new FormData(form);
-                const res = await fetch(url, {
-                    method: 'POST',
-                    body: formData,
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
-                const instanceId = data.minekuai_instance_id || '';
-                if (card) {
-                    const label = card.querySelector('.minekuai-status-label');
-                    if (label) {
-                        label.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
-                        label.dataset.minekuaiBoundTo = instanceId;
-                    }
-                    if (input) input.value = instanceId;
-                    appendMinekuaiOutput(card, '[实例绑定] ' + (data.message || '成功'));
-                }
-            } catch (e) {
-                appendMinekuaiOutput(card, '[实例绑定] 失败: ' + e.message);
-                form.submit();
-                return;
-            } finally {
-                if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+    // ---- 麦块模态框 ----
+    let currentMkServerId = null;
+    const minekuaiModal = document.getElementById('minekuaiModal');
+    const mkServerName = document.getElementById('mkServerName');
+    const mkStatusLabel = document.getElementById('mkStatusLabel');
+    const mkInstanceId = document.getElementById('mkInstanceId');
+    const mkBindForm = document.getElementById('mkBindForm');
+    const mkBindBtn = document.getElementById('mkBindBtn');
+    const mkCmdInput = document.getElementById('mkCmdInput');
+    const mkOutput = document.getElementById('mkOutput');
+
+    function openMinekuaiModal(serverId) {
+        currentMkServerId = serverId;
+        const row = document.querySelector('.server-row[data-server-id="' + serverId + '"]');
+        if (!row) return;
+        const nameEl = row.querySelector('.server-name-cell');
+        const name = nameEl ? nameEl.textContent.trim() : '服务器 #' + serverId;
+        mkServerName.textContent = name;
+        const instanceId = row.dataset.minekuaiInstanceId || '';
+        mkInstanceId.value = instanceId;
+        mkStatusLabel.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
+        mkOutput.textContent = '';
+        mkOutput.classList.add('hidden');
+        mkCmdInput.value = '';
+        minekuaiModal.classList.remove('hidden');
+    }
+
+    function closeMinekuaiModal() {
+        minekuaiModal.classList.add('hidden');
+        currentMkServerId = null;
+    }
+
+    // 实例 ID 绑定
+    mkBindForm.addEventListener('submit', async function () {
+        if (!currentMkServerId) return;
+        const val = (mkInstanceId.value || '').trim();
+        const row = document.querySelector('.server-row[data-server-id="' + currentMkServerId + '"]');
+        const url = '/server/' + currentMkServerId + '/bind_minekuai_instance';
+        if (mkBindBtn) { mkBindBtn.disabled = true; mkBindBtn.textContent = '⏳ 保存中…'; }
+        try {
+            const formData = new FormData();
+            const csrfToken = mkBindForm.querySelector('input[name="_csrf_token"]');
+            if (csrfToken) formData.append('_csrf_token', csrfToken.value);
+            formData.append('instance_id', val);
+            const res = await fetch(url, {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            const instanceId = data.minekuai_instance_id || '';
+            if (row) {
+                row.dataset.minekuaiInstanceId = instanceId;
             }
-        });
+            mkInstanceId.value = instanceId;
+            mkStatusLabel.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
+            appendMkOutput('[实例绑定] ' + (data.message || '成功'));
+        } catch (e) {
+            appendMkOutput('[实例绑定] 失败: ' + e.message);
+        } finally {
+            if (mkBindBtn) { mkBindBtn.disabled = false; mkBindBtn.textContent = '保存'; }
+        }
     });
 
     // 电源 / 资源按钮
-    document.querySelectorAll('.btn-minekuai-power, .btn-minekuai-secondary').forEach(btn => {
+    document.querySelectorAll('#mkPowerStart, #mkPowerRestart, #mkPowerStop, #mkPowerKill, #mkResources').forEach(btn => {
         btn.addEventListener('click', async function () {
+            if (!currentMkServerId) return;
             const action = btn.dataset.action;
-            const id = parseInt(btn.dataset.serverId, 10);
-            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-            if (!card) return;
             btn.disabled = true;
             const oldText = btn.textContent;
             btn.textContent = '⏳ …';
             try {
                 let res;
                 if (action === 'resources') {
-                    res = await fetch(API_MINEKUAI_RES(id), { method: 'GET', headers: { 'Accept': 'application/json' } });
+                    res = await fetch(API_MINEKUAI_RES(currentMkServerId), { method: 'GET', headers: { 'Accept': 'application/json' } });
                 } else {
-                    res = await fetch(API_MINEKUAI_POWER(id), {
+                    res = await fetch(API_MINEKUAI_POWER(currentMkServerId), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                         body: JSON.stringify({ signal: action })
@@ -673,12 +810,12 @@
                 }
                 let data;
                 try { data = await res.json(); } catch { data = { raw: res.statusText }; }
-                writeMinekuaiOutput(card,
+                writeMkOutput(
                     '[' + action.toUpperCase() + '] HTTP ' + res.status +
                     (data && data.raw ? ' ' + data.raw : '') +
                     (res.ok ? '\n✅ 发送成功' : (data && data.errors ? '\n❌ ' + JSON.stringify(data.errors) : '')));
             } catch (e) {
-                writeMinekuaiOutput(card, '[' + action.toUpperCase() + '] 失败: ' + e.message);
+                writeMkOutput('[' + action.toUpperCase() + '] 失败: ' + e.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = oldText;
@@ -687,40 +824,97 @@
     });
 
     // 命令发送
-    document.querySelectorAll('.minekuai-cmd-form').forEach(form => {
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            const id = parseInt(form.dataset.serverId, 10);
-            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-            if (!card) return;
-            const input = form.querySelector('input[name="command"]');
-            const btn = form.querySelector('button');
-            const cmd = (input.value || '').trim();
-            if (!cmd) return;
-            btn.disabled = true;
-            const oldText = btn.textContent;
-            btn.textContent = '⏳ 执行中…';
-            try {
-                const res = await fetch(API_MINEKUAI_CMD(id), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ command: cmd })
-                });
-                const data = await res.json();
-                writeMinekuaiOutput(card,
-                    '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
-                    JSON.stringify(data, null, 2));
-                input.value = '';
-            } catch (e) {
-                writeMinekuaiOutput(card, '[COMMAND] 失败: ' + e.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = oldText;
-            }
+    document.getElementById('mkCmdForm').addEventListener('submit', async function () {
+        if (!currentMkServerId) return;
+        const cmd = (mkCmdInput.value || '').trim();
+        if (!cmd) return;
+        const btn = this.querySelector('button');
+        btn.disabled = true;
+        const oldText = btn.textContent;
+        btn.textContent = '⏳ 执行中…';
+        try {
+            const res = await fetch(API_MINEKUAI_CMD(currentMkServerId), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ command: cmd })
+            });
+            const data = await res.json();
+            writeMkOutput(
+                '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
+                JSON.stringify(data, null, 2));
+            mkCmdInput.value = '';
+        } catch (e) {
+            writeMkOutput('[COMMAND] 失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = oldText;
+        }
+    });
+
+    // 打开麦块模态框按钮
+    document.querySelectorAll('.btn-minekuai-open').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const id = parseInt(this.dataset.serverId, 10);
+            openMinekuaiModal(id);
         });
     });
 
-    // ---- 服务器搜索 & 筛选 ----
+    // 关闭麦块模态框
+    document.getElementById('minekuaiModalClose').addEventListener('click', closeMinekuaiModal);
+    document.getElementById('mkCancelBtn').addEventListener('click', closeMinekuaiModal);
+    minekuaiModal.addEventListener('click', function (e) {
+        if (e.target === minekuaiModal) closeMinekuaiModal();
+    });
+
+    // ---- 编辑模态框 ----
+    let currentEditServerId = null;
+    const editModal = document.getElementById('editModal');
+    const editName = document.getElementById('editName');
+    const editHost = document.getElementById('editHost');
+    const editPort = document.getElementById('editPort');
+    const editProtocol = document.getElementById('editProtocol');
+    const editForm = document.getElementById('editForm');
+
+    function openEditModal(serverId) {
+        currentEditServerId = serverId;
+        const row = document.querySelector('.server-row[data-server-id="' + serverId + '"]');
+        if (!row) return;
+        const nameEl = row.querySelector('.server-name-cell');
+        const name = nameEl ? nameEl.textContent.trim() : '';
+        const host = row.dataset.host || '';
+        const port = row.dataset.port || '25565';
+        const protocol = row.dataset.protocol || 'java';
+        editName.value = name;
+        editHost.value = host;
+        editPort.value = port;
+        editProtocol.value = protocol;
+        editForm.action = '/server/' + serverId + '/edit';
+        editModal.classList.remove('hidden');
+    }
+
+    function closeEditModal() {
+        editModal.classList.add('hidden');
+        currentEditServerId = null;
+    }
+
+    document.querySelectorAll('.btn-edit-server').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const id = parseInt(this.dataset.serverId, 10);
+            openEditModal(id);
+        });
+    });
+
+    document.getElementById('editModalClose').addEventListener('click', closeEditModal);
+    document.getElementById('editCancelBtn').addEventListener('click', closeEditModal);
+    editModal.addEventListener('click', function (e) {
+        if (e.target === editModal) closeEditModal();
+    });
+
+    document.getElementById('editSaveBtn').addEventListener('click', function () {
+        editForm.submit();
+    });
+
+    // ---- 搜索 & 筛选 ----
     (function () {
         const searchInput = document.getElementById('serverSearch');
         const filterBtns = document.querySelectorAll('.filter-btn');
@@ -729,28 +923,34 @@
         let currentSearch = '';
 
         function applyServerFilter() {
-            const cards = document.querySelectorAll('.server-card');
+            const rows = document.querySelectorAll('.server-row');
             let visible = 0;
-            cards.forEach(card => {
-                const name = (card.querySelector('.server-name') || {}).textContent || '';
-                const host = (card.querySelector('.server-host') || {}).textContent || '';
-                const statusEl = card.querySelector('.server-status');
+            rows.forEach(row => {
+                const nameEl = row.querySelector('.server-name-cell');
+                const addrEl = row.querySelector('.server-addr-cell');
+                const name = nameEl ? nameEl.textContent : '';
+                const addr = addrEl ? addrEl.textContent : '';
+                const statusEl = row.querySelector('.server-status');
                 const isOnline = statusEl && statusEl.classList.contains('status-online');
                 const isOffline = statusEl && statusEl.classList.contains('status-offline');
                 const searchLower = currentSearch.toLowerCase();
-                const matchText = !currentSearch || name.toLowerCase().includes(searchLower) || host.toLowerCase().includes(searchLower);
+                const matchText = !currentSearch || name.toLowerCase().includes(searchLower) || addr.toLowerCase().includes(searchLower);
                 const matchFilter = currentFilter === 'all' ||
                     (currentFilter === 'online' && isOnline) ||
                     (currentFilter === 'offline' && isOffline);
+                // 同时控制 chart-row 的显示
+                const chartRow = document.querySelector('.chart-row[data-server-id="' + row.dataset.serverId + '"]');
                 if (matchText && matchFilter) {
-                    card.style.display = '';
+                    row.style.display = '';
+                    if (chartRow && !chartRow.classList.contains('hidden')) chartRow.style.display = '';
                     visible++;
                 } else {
-                    card.style.display = 'none';
+                    row.style.display = 'none';
+                    if (chartRow) chartRow.style.display = 'none';
                 }
             });
             if (serverCountLabel) {
-                serverCountLabel.textContent = '显示 ' + visible + ' / ' + cards.length + ' 台服务器';
+                serverCountLabel.textContent = '显示 ' + visible + ' / ' + rows.length + ' 台服务器';
             }
         }
 
@@ -776,10 +976,10 @@
             });
         });
 
-        // 暴露给 refresh 后重新筛选
         window._applyServerFilter = applyServerFilter;
     })();
 
+    // ---- 刷新 ----
     async function refresh() {
         if (refreshBtn) {
             refreshBtn.disabled = true;
@@ -833,7 +1033,6 @@
             return;
         }
 
-        // 如果上一次请求还没完成，取消它
         if (currentTestController) {
             currentTestController.abort('用户重新点击了测试按钮');
         }
@@ -931,8 +1130,8 @@
     setupAuto();
     refresh();
 
-    // ---- 历史图表渲染 ----
-    const _chartInstances = {};  // 存储每个服务器的 Chart 实例
+    // ---- 历史图表 ----
+    const _chartInstances = {};
 
     function _fmtChartTime(isoStr) {
         try {
@@ -941,12 +1140,11 @@
         } catch { return ''; }
     }
 
-    async function _loadAndRenderChart(serverId, card) {
-        const chartBox = card.querySelector('.server-chart-box');
-        const canvas = card.querySelector('.server-chart');
+    async function _loadAndRenderChart(serverId, row) {
+        const chartRow = document.querySelector('.chart-row[data-server-id="' + serverId + '"]');
+        const canvas = chartRow ? chartRow.querySelector('.server-chart') : null;
         if (!canvas) return;
 
-        // 如果已有实例，先销毁
         if (_chartInstances[serverId]) {
             _chartInstances[serverId].destroy();
             delete _chartInstances[serverId];
@@ -959,7 +1157,6 @@
             const history = data.history || [];
 
             if (history.length === 0) {
-                // 没有历史数据时显示提示
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.font = '13px -apple-system, sans-serif';
@@ -969,7 +1166,6 @@
                 return;
             }
 
-            // 反转数组（最旧的在前）与 labels
             const labels = history.map(h => _fmtChartTime(h.checked_at)).reverse();
             const onlineData = history.map(h => h.online ? (h.players_online || 0) : null).reverse();
             const latencyData = history.map(h => h.latency_ms).reverse();
@@ -1099,21 +1295,18 @@
     document.querySelectorAll('.btn-show-chart').forEach(btn => {
         btn.addEventListener('click', async function () {
             const id = parseInt(this.dataset.serverId, 10);
-            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-            if (!card) return;
+            const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
+            const chartRow = document.querySelector('.chart-row[data-server-id="' + id + '"]');
+            if (!chartRow) return;
 
-            const chartBox = card.querySelector('.server-chart-box');
             const btnText = this.textContent.trim();
-
-            if (btnText === '📈 查看图表') {
-                // 显示图表并加载数据
-                chartBox.classList.remove('hidden');
-                this.textContent = '📈 收起图表';
-                await _loadAndRenderChart(id, card);
+            if (btnText === '📈 图表') {
+                chartRow.classList.remove('hidden');
+                this.textContent = '📈 收起';
+                await _loadAndRenderChart(id, row);
             } else {
-                // 收起图表
-                chartBox.classList.add('hidden');
-                this.textContent = '📈 查看图表';
+                chartRow.classList.add('hidden');
+                this.textContent = '📈 图表';
             }
         });
     });
@@ -1122,15 +1315,13 @@
     document.querySelectorAll('.btn-chart-close').forEach(btn => {
         btn.addEventListener('click', function () {
             const id = parseInt(this.dataset.serverId, 10);
-            const card = document.querySelector('.server-card[data-server-id="' + id + '"]');
-            if (!card) return;
-
-            const chartBox = card.querySelector('.server-chart-box');
-            chartBox.classList.add('hidden');
-
-            // 同步按钮文案
-            const showBtn = card.querySelector('.btn-show-chart');
-            if (showBtn) showBtn.textContent = '📈 查看图表';
+            const chartRow = document.querySelector('.chart-row[data-server-id="' + id + '"]');
+            if (chartRow) chartRow.classList.add('hidden');
+            const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
+            if (row) {
+                const showBtn = row.querySelector('.btn-show-chart');
+                if (showBtn) showBtn.textContent = '📈 图表';
+            }
         });
     });
 
@@ -1141,8 +1332,6 @@
         const dropdown = document.getElementById('alertsDropdown');
         const alertsList = document.getElementById('alertsList');
         const ackAllBtn = document.getElementById('ackAllAlerts');
-
-        let alertCount = 0;
 
         function formatAlertTime(isoStr) {
             try {
@@ -1180,7 +1369,7 @@
                 const data = await res.json();
                 const alerts = data.alerts || [];
 
-                alertCount = alerts.length;
+                const alertCount = alerts.length;
                 if (alertCount > 0) {
                     badge.textContent = alertCount > 99 ? '99+' : alertCount;
                     badge.classList.remove('hidden');
@@ -1210,7 +1399,6 @@
                     '</div>';
                 }).join('');
 
-                // 单条忽略
                 alertsList.querySelectorAll('.ack-single').forEach(btn => {
                     btn.addEventListener('click', async function (e) {
                         e.stopPropagation();
@@ -1224,7 +1412,6 @@
                     });
                 });
 
-                // 点击整行也标记已读
                 alertsList.querySelectorAll('.alert-item').forEach(item => {
                     item.addEventListener('click', async function () {
                         const id = parseInt(this.dataset.id, 10);
@@ -1241,7 +1428,6 @@
             }
         }
 
-        // 点击铃铛切换下拉
         bell.addEventListener('click', function (e) {
             e.stopPropagation();
             dropdown.classList.toggle('hidden');
@@ -1250,14 +1436,12 @@
             }
         });
 
-        // 点击页面其他地方关闭
         document.addEventListener('click', function (e) {
             if (!dropdown.contains(e.target) && e.target !== bell) {
                 dropdown.classList.add('hidden');
             }
         });
 
-        // 全部已读
         ackAllBtn.addEventListener('click', async function () {
             await fetch('/api/alerts/acknowledge', {
                 method: 'POST',
@@ -1269,11 +1453,9 @@
             loadAlerts();
         });
 
-        // 每 30 秒轮询一次新告警
         loadAlerts();
         setInterval(loadAlerts, 30000);
 
-        // 暴露给深色模式切换时同步样式
         window._applyAlertDarkMode = applyAlertDarkMode;
     })();
 
@@ -1298,7 +1480,6 @@
         function init() {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved === null) {
-                // Default: follow system preference
                 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
                 applyDarkMode(prefersDark);
             } else {
@@ -1314,6 +1495,45 @@
         });
 
         init();
+    })();
+
+    // ---- SortableJS: 拖拽排序 ----
+    (function () {
+        const tbody = document.getElementById('serverTableBody');
+        if (!tbody) return;
+
+        // 过滤掉 chart-row，只排序 server-row
+        const sortable = new Sortable(tbody, {
+            handle: '.drag-handle',
+            draggable: '.server-row',
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            animation: 150,
+            onEnd: async function (evt) {
+                // 收集新顺序
+                const rows = tbody.querySelectorAll('.server-row');
+                const order = [];
+                rows.forEach(row => {
+                    order.push(parseInt(row.dataset.serverId, 10));
+                });
+
+                try {
+                    const csrfToken = document.querySelector('input[name="_csrf_token"]');
+                    const token = csrfToken ? csrfToken.value : '';
+                    const res = await fetch('/server/reorder', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ order: order, _csrf_token: token })
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                } catch (e) {
+                    console.error('排序保存失败:', e);
+                }
+            }
+        });
     })();
 
     // ---- PWA: 注册 Service Worker ----
