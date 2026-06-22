@@ -11,7 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 RUN useradd --create-home --shell /bin/bash mcmonitor && \
-    chown -R mcmonitor:mcmonitor /app
+    mkdir -p /app/data && \
+    chown -R mcmonitor:mcmonitor /app && \
+    chmod -R u+rw /app
 
 USER mcmonitor
 

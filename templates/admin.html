@@ -173,7 +173,15 @@
     <!-- 用户列表 -->
     <section class="card">
         <h2>👥 用户列表（共 {{ total_users }} 个）</h2>
-        <div class="admin-table-wrap">
+        <div class="admin-table-wrap" style="margin-top: 8px;">
+            <div style="padding: 8px 12px; background: #fff6cc; border: 1px solid #e9cf73; border-radius: 8px; margin-bottom: 12px; font-size: 13px;">
+                <strong>🔐 敏感操作保护：</strong>为了安全，重置任意用户密码前，必须先在下面输入您的当前管理员密码进行验证（一次会话内只需填一次）。
+                <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+                    <input type="password" id="globalAdminPassword" placeholder="您的当前管理员密码" style="flex: 1; max-width: 320px;">
+                    <button type="button" class="btn btn-sm btn-outline" id="applyAdminPwdBtn">填入所有重置表单</button>
+                    <span id="adminPwdStatus" style="color:#666; font-size: 12px;"></span>
+                </div>
+            </div>
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -208,8 +216,9 @@
                         <td>{{ u.created_at }}</td>
                         <td>
                             <!-- 重置密码 -->
-                            <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form">
+                            <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form reset-password-form">
                                 {{ csrf_input() }}
+                                <input type="hidden" name="admin_password" value="">
                                 <input type="text" name="new_password" placeholder="新密码" size="14" required>
                                 {% if u.username == 'admin' %}
                                     <input type="hidden" name="confirm_admin" value="1">
@@ -364,6 +373,28 @@
         applyDarkMode(newIsDark);
         localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
     });
+
+    // 敏感操作：管理员密码填充支持
+    var globalAdminPwd = document.getElementById('globalAdminPassword');
+    var applyPwdBtn = document.getElementById('applyAdminPwdBtn');
+    var pwdStatus = document.getElementById('adminPwdStatus');
+    if (globalAdminPwd && applyPwdBtn) {
+        function applyAdminPassword() {
+            var val = globalAdminPwd.value;
+            if (!val) {
+                if (pwdStatus) { pwdStatus.textContent = '请先输入您的管理员密码'; pwdStatus.style.color = '#c00'; }
+                return;
+            }
+            var filled = 0;
+            document.querySelectorAll('.reset-password-form input[name="admin_password"]').forEach(function (inp) {
+                inp.value = val;
+                filled += 1;
+            });
+            if (pwdStatus) { pwdStatus.textContent = '已填充 ' + filled + ' 个重置表单，请点击「重置密码」按钮'; pwdStatus.style.color = '#2a8'; }
+        }
+        applyPwdBtn.addEventListener('click', applyAdminPassword);
+        globalAdminPwd.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); applyAdminPassword(); } });
+    }
 
     init();
 })();
