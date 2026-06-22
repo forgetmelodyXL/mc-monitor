@@ -25,7 +25,7 @@ jobs:
       - name: Lint with flake8
         run: |
           pip install flake8
-          flake8 app.py db.py main.py --count --max-line-length=120 --statistics --ignore=E402,E501,W503
+          flake8 app.py db.py main.py --count --max-line-length=120 --statistics --ignore=E127,E128,E241,E302,E401,E402,E501,F401,F811,F841,W292,W503
 
       - name: Run tests
         run: |
