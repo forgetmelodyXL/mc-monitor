@@ -324,7 +324,7 @@ def init_db(db_path=None):
 
     _env = os.environ.get("MCMONITOR_ENV", "development").lower()
     _bootstrap = os.environ.get("MCMONITOR_BOOTSTRAP_ADMIN", "").strip()
-    
+
     # 检查是否已有用户
     has_users = False
     try:
@@ -332,7 +332,7 @@ def init_db(db_path=None):
         has_users = existing_count and existing_count[0] > 0
     except Exception:
         pass
-    
+
     if _bootstrap == "1":
         # 通过环境变量显式配置管理员
         _bs_user = os.environ.get("MCMONITOR_BOOTSTRAP_USERNAME", "admin").strip()
