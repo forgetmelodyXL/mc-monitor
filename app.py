@@ -1471,29 +1471,29 @@ def admin_reset_password(user_id):
     user = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
-    
+
     admin_user_id = session["user_id"]
     admin_user = db.execute("SELECT id, password_hash FROM users WHERE id = ?", (admin_user_id,)).fetchone()
     if not admin_user:
         abort(404)
-    
+
     admin_current_password = request.form.get("admin_password", "").strip()
     if not admin_current_password:
         flash("请输入管理员当前密码", "error")
         return redirect(url_for("admin_panel"))
-    
+
     if not verify_password(admin_current_password, admin_user["password_hash"]):
         flash("管理员密码错误", "error")
         return redirect(url_for("admin_panel"))
-    
+
     if user["username"] == "admin" and not request.form.get("confirm_admin"):
         pass
-    
+
     new_password = (request.form.get("new_password") or "").strip()
     if len(new_password) < 6:
         flash("新密码长度至少 6 个字符", "error")
         return redirect(url_for("admin_panel"))
-    
+
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                (hash_password(new_password), user_id))
     db.commit()
