@@ -343,19 +343,7 @@ def init_db(db_path=None):
                 except Exception:
                     pass
     else:
-        try:
-            existing = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
-            if not existing:
-                import hashlib, secrets
-                salt = secrets.token_hex(16)
-                digest = hashlib.pbkdf2_hmac("sha256", b"admin", salt.encode(), 200000).hex()
-                pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
-                conn.execute(
-                    "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
-                    ("admin", pw_hash, now),
-                )
-        except Exception:
-            pass
+        pass
 
     # 将旧 is_admin=1 的用户升级为 admin 角色
     try:

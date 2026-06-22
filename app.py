@@ -87,18 +87,23 @@ app = Flask(
     template_folder=TEMPLATE_DIR,
     static_folder=STATIC_DIR,
 )
-app.config["SECRET_KEY"] = os.environ.get(
-    "MCMONITOR_SECRET_KEY",
-    "mc-monitor-server-secret-key-change-in-production-2024",
-)
+_secret_key = os.environ.get("MCMONITOR_SECRET_KEY")
+if IS_PRODUCTION:
+    if not _secret_key:
+        raise RuntimeError(
+            "SECRET_KEY is not set in production mode. "
+            "Please set MCMONITOR_SECRET_KEY environment variable. "
+            "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+else:
+    _secret_key = _secret_key or secrets.token_hex(32)
+
+app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION
 app.config["PREFERRED_URL_SCHEME"] = "https" if IS_PRODUCTION else "http"
-
-if IS_PRODUCTION and app.config["SECRET_KEY"] == "mc-monitor-server-secret-key-change-in-production-2024":
-    print("WARNING: Using default SECRET_KEY in production mode. Set MCMONITOR_SECRET_KEY env var.")
 
 
 def _setup_logging():
@@ -402,9 +407,9 @@ def generate_csrf_token():
 def validate_csrf_token():
     """验证请求中的 CSRF token，验证通过返回 True"""
     form_token = request.form.get(CSRF_TOKEN_NAME) or ""
-    session_token = session.get(CSRF_TOKEN_NAME, "")  # 修复：使用一致的 key
-    # 请求头中也可以传 X-CSRF-Token
+    session_token = session.get(CSRF_TOKEN_NAME, "")
     header_token = request.headers.get("X-CSRF-Token", "")
+    header_token = header_token or request.headers.get("X-CSRFToken", "")
     token = form_token if form_token else header_token
     if not token or not session_token:
         return False
@@ -431,14 +436,8 @@ def ensure_csrf_token():
     if CSRF_TOKEN_NAME not in session:
         session[CSRF_TOKEN_NAME] = secrets.token_hex(32)
 
-    # 非 GET 请求验证 CSRF（API 路由跳过，由各自业务逻辑处理）
+    # 非 GET 请求验证 CSRF
     if request.method in ("GET", "HEAD", "OPTIONS"):
-        return
-    # API 路由跳过（使用 session cookie 认证，fetch 请求会携带 cookie）
-    if request.path.startswith("/api/"):
-        return
-    # 登录/注册 API 跳过（麦块 API 代理跳过）
-    if request.path.startswith("/minekuai/"):
         return
     if not validate_csrf_token():
         abort(403)
@@ -1299,8 +1298,16 @@ def login():
             session.permanent = True
             _audit("login", "success", user_id=user["id"], username=user["username"])
             next_url = request.args.get("next") or url_for("dashboard")
-            if not next_url.startswith("/"):
-                next_url = url_for("dashboard")
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(next_url)
+                if parsed.scheme or parsed.netloc:
+                    next_url = url_for("dashboard")
+                elif not next_url.startswith("/"):
+                    next_url = url_for("dashboard")
+            except Exception:
+                if not next_url.startswith("/"):
+                    next_url = url_for("dashboard")
             return redirect(next_url)
         flash("用户名或密码错误", "error")
     return render_template("login.html", in_maintenance=in_maintenance)
@@ -1464,18 +1471,34 @@ def admin_reset_password(user_id):
     user = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
+    
+    admin_user_id = session["user_id"]
+    admin_user = db.execute("SELECT id, password_hash FROM users WHERE id = ?", (admin_user_id,)).fetchone()
+    if not admin_user:
+        abort(404)
+    
+    admin_current_password = request.form.get("admin_password", "").strip()
+    if not admin_current_password:
+        flash("请输入管理员当前密码", "error")
+        return redirect(url_for("admin_panel"))
+    
+    if not verify_password(admin_current_password, admin_user["password_hash"]):
+        flash("管理员密码错误", "error")
+        return redirect(url_for("admin_panel"))
+    
     if user["username"] == "admin" and not request.form.get("confirm_admin"):
-        # 防止意外重置 admin 的保护：强制传 confirm_admin
         pass
+    
     new_password = (request.form.get("new_password") or "").strip()
     if len(new_password) < 6:
         flash("新密码长度至少 6 个字符", "error")
         return redirect(url_for("admin_panel"))
+    
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                (hash_password(new_password), user_id))
     db.commit()
     _audit("admin_reset_password", f"target user: {user['username']}")
-    flash(f"已重置用户 {user['username']} 的密码为: {new_password}", "success")
+    flash(f"已重置用户 {user['username']} 的密码", "success")
     return redirect(url_for("admin_panel"))
 
 
@@ -2485,6 +2508,12 @@ def server_bind_minekuai_instance(server_id):
         abort(404)
     instance_id = request.form.get("instance_id") or (request.get_json() or {}).get("instance_id") or ""
     instance_id = (instance_id or "").strip()
+    if instance_id and not _validate_instance_id(instance_id):
+        error_msg = "无效的实例 ID，只允许字母、数字、下划线和连字符。"
+        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
+            return jsonify({"ok": False, "error": error_msg}), 400
+        flash(error_msg, "error")
+        return redirect(url_for("dashboard"))
     db.execute(
         "UPDATE servers SET minekuai_instance_id = ? WHERE id = ?",
         (instance_id or None, server_id),
@@ -2521,6 +2550,21 @@ def api_minekuai_list_servers():
     return jsonify(body), status
 
 
+import re
+
+_INSTANCE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+def _validate_instance_id(instance_id: str) -> bool:
+    """校验 instance_id 是否合法，只允许字母、数字、下划线和连字符。"""
+    if not isinstance(instance_id, str) or not instance_id:
+        return False
+    if '..' in instance_id or '../' in instance_id or '..\\' in instance_id:
+        return False
+    if '@' in instance_id or ':' in instance_id:
+        return False
+    return bool(_INSTANCE_ID_PATTERN.match(instance_id))
+
+
 def _get_server_for_minekuai(server_id: int):
     """校验服务器归属，并返回 (server_row, api_key) 或报错返回 (None, (status, body))。"""
     db = get_db()
@@ -2532,12 +2576,21 @@ def _get_server_for_minekuai(server_id: int):
         return None, (404, {
             "errors": [{"code": "NotFound", "status": "404", "detail": "未找到该服务器"}]
         })
-    if not row_get(server, "minekuai_instance_id"):
+    instance_id = row_get(server, "minekuai_instance_id", "")
+    if not instance_id:
         return None, (400, {
             "errors": [{
                 "code": "InstanceIdMissing",
                 "status": "400",
                 "detail": "该服务器尚未绑定麦块实例 ID，请先在页面中绑定。",
+            }]
+        })
+    if not _validate_instance_id(instance_id):
+        return None, (400, {
+            "errors": [{
+                "code": "InvalidInstanceId",
+                "status": "400",
+                "detail": "无效的实例 ID，只允许字母、数字、下划线和连字符。",
             }]
         })
     api_key, err = _require_api_key()

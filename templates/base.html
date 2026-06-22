@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#6c8dff">
     <meta name="description" content="实时监控 Minecraft 服务器状态，支持掉线告警、历史图表">
+    <meta name="csrf-token" content="{{ session.get('_csrf_token', '') }}">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%231a1d2e'/><text y='320' font-size='280' text-anchor='middle' fill='%236c8dff'>⛏</text></svg>">
     <title>{% block title %}MC 服务器监控{% endblock %}</title>
@@ -22,6 +23,12 @@
     {% endif %}
 {% endwith %}
 {% block content %}{% endblock %}
+<script>
+function getCsrfToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+</script>
 </body>
 </html>
 
