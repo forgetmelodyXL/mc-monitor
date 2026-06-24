@@ -13,6 +13,57 @@
 - Docker 镜像
 - 多语言（i18n）
 
+## [1.1.3] - 2026-06-24
+
+### ✨ 新增
+- **用户下拉菜单**：顶栏用户名按钮支持 hover 下拉菜单，统一收纳管理服务器、修改个人信息、历史告警、注销等功能
+- **个人信息页** (`/profile`)：支持修改用户名和修改密码，修改后强制重新登录
+- **管理员专属菜单项**：下拉菜单中"管理后台"和"监控指标"仅管理员可见
+
+### 🔒 安全
+- 增强角色权限保护：普通管理员不能降级/删除级别不低于自己的用户
+- 初始 admin 账号设为超级管理员 (`super_admin`)，不可被其他管理员降级或删除
+- 注销路由支持 POST 方法（配合 CSRF token 更安全）
+
+### 🎨 界面
+- 简化登录后页面顶栏：移除冗余按钮，保留公共主页 + 用户下拉菜单
+- 移除登录/注册页的深色模式切换按钮
+- 修复下拉菜单 hover 间隙问题（鼠标移到菜单上不会闪烁消失）
+
+### 🔧 调整
+- 移除管理后台中"修改自己密码"功能（统一走个人信息页）
+- 移除管理后台中"为用户添加服务器"功能
+
+## [1.1.2] - 2026-06-24
+
+### 🔒 安全
+- 修复非生产环境下默认管理员账号创建问题
+- 修复实例绑定 URL 路径不匹配（404 错误）
+- 离线服务器延迟显示为 "—" 而非空值
+
+### 🔧 修复
+- 修复 flake8 W293 空白行尾随空格警告
+- 修复 CI 测试任务配置
+
+## [1.1.1] - 2026-06-23
+
+### 🔧 修复
+- 修复 CI 测试作业失败问题
+- 调整 flake8 忽略规则与代码库保持一致
+
+## [1.1.0] - 2026-06-21
+
+### ✨ 新增
+- 麦块联机 API Key 绑定功能
+- 服务器分组管理
+- 历史告警页面
+- 首次启动自动创建临时管理员账号并打印随机密码
+
+### 🔒 安全
+- 多项安全审计漏洞修复
+- CSRF 令牌完善
+- 会话管理增强
+
 ## [1.0.0] - 2026-06-17
 
 ### ✨ 新增
@@ -57,6 +108,10 @@
 - 公共主页 + 我的管理
 - 简单管理后台
 
-[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.3
+[1.1.2]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.2
+[1.1.1]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.1
+[1.1.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.0.0
 [0.1.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v0.1.0
