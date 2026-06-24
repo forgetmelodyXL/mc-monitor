@@ -1761,8 +1761,8 @@ def admin_email_settings():
 @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_password(user_id):
-    conn = get_db()
-    user = conn.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    db = get_db()
+    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
 
