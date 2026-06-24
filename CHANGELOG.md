@@ -5,12 +5,36 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.3.0] - 2026-06-25
+
+### ✨ 新增
+- **命令行工具（CLI）**：新增 `monitor` 前缀指令，支持重置 admin 密码、创建用户、列出用户等后台管理操作
+- **交互式命令行**：服务运行时可直接在控制台输入 `monitor` 命令进行管理，无需重启程序
+- **WAL 自动清理**：服务启动时自动 checkpoint 上次遗留的 WAL 文件，直接叉掉窗口也不会残留脏数据
+
+### 🎨 优化
+- **首次启动信息**：admin 账号密码信息移到启动横幅下方统一展示，更醒目
+- **热加载模式**：debug 模式下父进程（监控进程）不再重复打印启动信息，输出更清爽
+- **WAL 配置**：设置 `wal_autocheckpoint = 1000`，运行中自动合并，避免 WAL 文件无限增长
+
+## [1.2.0] - 2026-06-25
+
+### ✨ 新增
+- **Docker 部署支持**：新增 `Dockerfile` 和 `docker-compose.yml`，支持容器化部署
+- **Linux 一键安装脚本**：`install.sh` / `update.sh` / `uninstall.sh`，自动检测环境并安装依赖（Docker 或 Python）
+- **自动安装依赖**：一键脚本支持自动安装 Docker、Python3、git，支持 Debian / RHEL / Arch / Alpine 等主流发行版
+- **systemd 自动配置**：Python 方式部署可选配置 systemd 服务，实现开机自启
+- **邮件告警推送**：管理员可在后台配置 SMTP，用户在个人中心开启后，服务器上下线时自动收到邮件通知（带冷却机制，防骚扰）
+- **邮件测试功能**：管理后台支持发送测试邮件验证 SMTP 配置
+
+### 🔧 调整
+- **简化环境变量**：移除 `MCMONITOR_BOOTSTRAP_ADMIN` 和 `MCMONITOR_BOOTSTRAP_USERNAME`，仅通过 `MCMONITOR_BOOTSTRAP_PASSWORD` 控制初始管理员创建（用户名固定为 `admin`）
+- **Session 密钥**：生产环境未设置 `MCMONITOR_SECRET_KEY` 时自动生成，与开发环境行为一致
+- **默认配置优化**：生产环境下 `MCMONITOR_NOBROWSER` 默认为 `1`（不自动打开浏览器）
 
 ### 计划中
-- Telegram / 微信 / 邮件告警推送
+- Telegram / 微信 / 钉钉告警推送
 - WebSocket 实时状态推送
-- Docker 镜像
 - 多语言（i18n）
 
 ## [1.1.3] - 2026-06-24
@@ -108,7 +132,9 @@
 - 公共主页 + 我的管理
 - 简单管理后台
 
-[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.3.0
+[1.2.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.2.0
 [1.1.3]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.3
 [1.1.2]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.2
 [1.1.1]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.1

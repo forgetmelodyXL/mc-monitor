@@ -79,6 +79,11 @@ DB_PATH = os.path.join(DATA_DIR, "mcmonitor.db")
 TEMPLATE_DIR = os.path.join(RESOURCE_DIR, "templates")
 STATIC_DIR = os.path.join(RESOURCE_DIR, "static")
 
+# PyInstaller 打包检测：frozen 状态下强制生产环境，关闭 debug
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("MCMONITOR_ENV", "production")
+    os.environ["MCMONITOR_DEBUG"] = "0"
+
 _ENV = os.environ.get("MCMONITOR_ENV", "development").lower()
 IS_PRODUCTION = _ENV == "production"
 
@@ -88,15 +93,7 @@ app = Flask(
     static_folder=STATIC_DIR,
 )
 _secret_key = os.environ.get("MCMONITOR_SECRET_KEY")
-if IS_PRODUCTION:
-    if not _secret_key:
-        raise RuntimeError(
-            "SECRET_KEY is not set in production mode. "
-            "Please set MCMONITOR_SECRET_KEY environment variable. "
-            "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
-        )
-else:
-    _secret_key = _secret_key or secrets.token_hex(32)
+_secret_key = _secret_key or secrets.token_hex(32)
 
 app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
@@ -234,7 +231,7 @@ def _ensure_schema(db):
 # ============================================================
 # 数据库迁移系统
 # ============================================================
-_SCHEMA_VERSION = 5  # 当前代码库对应的 schema 版本
+_SCHEMA_VERSION = 6  # 当前代码库对应的 schema 版本
 
 
 def _get_schema_version(conn):
@@ -343,6 +340,12 @@ def _run_migrations(conn):
             "ALTER TABLE servers ADD COLUMN group_id INTEGER",
             "ALTER TABLE servers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'java'",
         ]),
+        # v6: 邮件告警相关字段
+        (6, "add_email_alerts", [
+            "ALTER TABLE users ADD COLUMN email TEXT",
+            "ALTER TABLE users ADD COLUMN email_alert_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN email_cooldown INTEGER NOT NULL DEFAULT 30",
+        ]),
     ]
 
     for version, desc, statements in migrations:
@@ -446,7 +449,7 @@ def ensure_csrf_token():
 # ============================================================
 # 版本信息 & 模板上下文
 # ============================================================
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.3.0"
 
 
 @app.context_processor
@@ -525,6 +528,108 @@ def set_setting(key: str, value: str) -> None:
         (key, value, now),
     )
     db.commit()
+
+
+# ============================================================
+# 邮件告警
+# ============================================================
+
+_EMAIL_COOLDOWN = {}
+
+
+def send_email(to_email: str, subject: str, body: str) -> bool:
+    """发送邮件，返回是否成功"""
+    if get_setting("email_enabled", "0") != "1":
+        return False
+
+    smtp_host = get_setting("email_smtp_host", "")
+    smtp_port = int(get_setting("email_smtp_port", "465"))
+    smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
+    smtp_user = get_setting("email_smtp_user", "")
+    smtp_pass = get_setting("email_smtp_password", "")
+    from_addr = get_setting("email_from", smtp_user)
+    prefix = get_setting("email_subject_prefix", "[MC监控]")
+
+    if not smtp_host or not smtp_user or not smtp_pass:
+        return False
+
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+
+    try:
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["From"] = Header(from_addr)
+        msg["To"] = Header(to_email)
+        msg["Subject"] = Header(f"{prefix} {subject}")
+
+        if smtp_ssl:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            server.starttls()
+
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(from_addr, [to_email], msg.as_string())
+        server.quit()
+        logging.info(f"[Email] 邮件发送成功: {to_email} - {subject}")
+        return True
+    except Exception as e:
+        logging.warning(f"[Email] 发送失败 ({to_email}): {e}")
+        return False
+
+
+def _check_email_cooldown(user_id: int, server_id: int) -> bool:
+    """检查是否在冷却期内，返回 True 表示在冷却中（不发送）"""
+    key = (user_id, server_id)
+    last = _EMAIL_COOLDOWN.get(key)
+    if not last:
+        return False
+    db = get_db()
+    user_row = db.execute(
+        "SELECT email_cooldown FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    cooldown_min = int(row_get(user_row, "email_cooldown", 30))
+    elapsed = (datetime.utcnow() - last).total_seconds() / 60
+    return elapsed < cooldown_min
+
+
+def _set_email_cooldown(user_id: int, server_id: int) -> None:
+    """设置冷却时间"""
+    _EMAIL_COOLDOWN[(user_id, server_id)] = datetime.utcnow()
+
+
+def send_alert_email(user_id: int, server_id: int, server_name: str,
+                    event_type: str, message: str) -> bool:
+    """发送告警邮件（带冷却检查）"""
+    db = get_db()
+    user_row = db.execute(
+        "SELECT email, email_alert_enabled FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    if not user_row:
+        return False
+    if row_get(user_row, "email_alert_enabled", 0) != 1:
+        return False
+    to_email = row_get(user_row, "email", "")
+    if not to_email:
+        return False
+    if _check_email_cooldown(user_id, server_id):
+        return False
+
+    subject = "服务器掉线告警" if event_type == "offline" else "服务器恢复通知"
+    body = (
+        f"{message}\n"
+        f"\n"
+        f"服务器: {server_name}\n"
+        f"时间: {datetime.utcnow().isoformat(sep=' ', timespec='seconds')} UTC\n"
+        f"\n"
+        f"-- MC 服务器监控\n"
+    )
+    ok = send_email(to_email, subject, body)
+    if ok:
+        _set_email_cooldown(user_id, server_id)
+    return ok
 
 
 def admin_required(view):
@@ -1336,25 +1441,28 @@ def user_profile():
     db = get_db()
     _ensure_schema(db)
     user = db.execute(
-        "SELECT id, username, created_at FROM users WHERE id = ?",
+        "SELECT id, username, email, email_alert_enabled, email_cooldown, created_at FROM users WHERE id = ?",
         (session["user_id"],),
     ).fetchone()
     if not user:
         abort(404)
     error = None
+    email_error = None
+    username_error = None
+    password_error = None
     if request.method == "POST":
         action = request.form.get("action")
         if action == "change_username":
             new_username = (request.form.get("new_username") or "").strip()
             if len(new_username) < 3 or len(new_username) > 32:
-                error = "用户名长度必须在 3-32 个字符之间"
+                username_error = "用户名长度必须在 3-32 个字符之间"
             else:
                 existing = db.execute(
                     "SELECT id FROM users WHERE username = ? AND id != ?",
                     (new_username, session["user_id"]),
                 ).fetchone()
                 if existing:
-                    error = "该用户名已被占用"
+                    username_error = "该用户名已被占用"
                 else:
                     db.execute(
                         "UPDATE users SET username = ? WHERE id = ?",
@@ -1371,16 +1479,16 @@ def user_profile():
             new_password = (request.form.get("new_password") or "").strip()
             confirm_password = request.form.get("confirm_password") or ""
             if len(new_password) < 8:
-                error = "新密码长度至少 8 个字符"
+                password_error = "新密码长度至少 8 个字符"
             elif new_password != confirm_password:
-                error = "两次输入的新密码不一致"
+                password_error = "两次输入的新密码不一致"
             else:
                 user_full = db.execute(
                     "SELECT password_hash FROM users WHERE id = ?",
                     (session["user_id"],),
                 ).fetchone()
-                if not verify_password(user_full["password_hash"], current_password):
-                    error = "当前密码不正确"
+                if not verify_password(current_password, user_full["password_hash"]):
+                    password_error = "当前密码不正确"
                 else:
                     db.execute(
                         "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -1391,7 +1499,36 @@ def user_profile():
                     _audit("profile_change_password", "password changed")
                     session.clear()
                     return redirect(url_for("login"))
-    return render_template("profile.html", user=user, error=error, username=session.get("username", ""))
+        elif action == "save_email":
+            email = (request.form.get("email") or "").strip()
+            email_enabled = 1 if request.form.get("email_alert_enabled") else 0
+            try:
+                cooldown = int(request.form.get("email_cooldown", "30"))
+                cooldown = max(1, min(cooldown, 1440))
+            except ValueError:
+                cooldown = 30
+            import re
+            email_re = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
+            if email and not re.match(email_re, email):
+                email_error = "邮箱格式不正确"
+            else:
+                db.execute(
+                    "UPDATE users SET email = ?, email_alert_enabled = ?, email_cooldown = ? WHERE id = ?",
+                    (email or None, email_enabled, cooldown, session["user_id"]),
+                )
+                db.commit()
+                _audit("profile_save_email", f"email={email}, enabled={email_enabled}")
+                flash("邮件通知设置已保存", "success")
+                return redirect(url_for("user_profile"))
+    return render_template(
+        "profile.html",
+        user=user,
+        error=error,
+        email_error=email_error,
+        username_error=username_error,
+        password_error=password_error,
+        username=session.get("username", ""),
+    )
 
 
 @app.route("/logout", methods=["GET", "POST"])
@@ -1453,6 +1590,15 @@ def admin_panel():
     ).fetchone()
     status_logs_count = count_row["logs_count"] if count_row else 0
     alerts_count = count_row["alerts_count"] if count_row else 0
+    # 邮件配置
+    email_enabled = get_setting("email_enabled", "0") == "1"
+    smtp_host = get_setting("email_smtp_host", "")
+    smtp_port = get_setting("email_smtp_port", "465")
+    smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
+    smtp_user = get_setting("email_smtp_user", "")
+    smtp_pass_set = bool(get_setting("email_smtp_password", ""))
+    email_from = get_setting("email_from", "")
+    subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
     return render_template("admin.html",
                            users=users, servers=servers,
                            total_users=total_users,
@@ -1464,6 +1610,14 @@ def admin_panel():
                            cleanup_alerts_days=cleanup_alerts_days,
                            status_logs_count=status_logs_count,
                            alerts_count=alerts_count,
+                           email_enabled=email_enabled,
+                           smtp_host=smtp_host,
+                           smtp_port=smtp_port,
+                           smtp_ssl=smtp_ssl,
+                           smtp_user=smtp_user,
+                           smtp_pass_set=smtp_pass_set,
+                           email_from=email_from,
+                           subject_prefix=subject_prefix,
                            current_username=session.get("username", ""))
 
 
@@ -1540,6 +1694,70 @@ def admin_run_cleanup():
     return redirect(url_for("admin_panel"))
 
 
+@app.route("/admin/settings/email", methods=["GET", "POST"])
+@admin_required
+def admin_email_settings():
+    """邮件告警配置页面"""
+    db = get_db()
+
+    if request.method == "POST":
+        action = request.form.get("action", "save")
+
+        if action == "save":
+            set_setting("email_enabled", "1" if request.form.get("email_enabled") else "0")
+            set_setting("email_smtp_host", request.form.get("smtp_host", "").strip())
+            set_setting("email_smtp_port", request.form.get("smtp_port", "465").strip() or "465")
+            set_setting("email_smtp_ssl", "1" if request.form.get("smtp_ssl") else "0")
+            set_setting("email_smtp_user", request.form.get("smtp_user", "").strip())
+            new_pass = request.form.get("smtp_password", "").strip()
+            if new_pass:
+                set_setting("email_smtp_password", new_pass)
+            set_setting("email_from", request.form.get("email_from", "").strip())
+            set_setting("email_subject_prefix", request.form.get("subject_prefix", "[MC监控]").strip() or "[MC监控]")
+            _audit("update_email_settings", "updated SMTP config")
+            flash("邮件配置已保存", "success")
+            return redirect(url_for("admin_email_settings"))
+
+        elif action == "test":
+            test_to = request.form.get("test_email", "").strip()
+            if not test_to:
+                flash("请输入测试收件邮箱", "error")
+                return redirect(url_for("admin_email_settings"))
+            ok = send_email(
+                test_to,
+                "测试邮件",
+                "这是一封测试邮件，说明 SMTP 配置正确。\n\n-- MC 服务器监控"
+            )
+            if ok:
+                flash("测试邮件发送成功，请查收", "success")
+            else:
+                flash("测试邮件发送失败，请检查配置和日志", "error")
+            return redirect(url_for("admin_email_settings"))
+
+    email_enabled = get_setting("email_enabled", "0") == "1"
+    smtp_host = get_setting("email_smtp_host", "")
+    smtp_port = get_setting("email_smtp_port", "465")
+    smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
+    smtp_user = get_setting("email_smtp_user", "")
+    smtp_pass_set = bool(get_setting("email_smtp_password", ""))
+    email_from = get_setting("email_from", "")
+    subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
+
+    return render_template(
+        "admin.html",
+        email_settings=True,
+        email_enabled=email_enabled,
+        smtp_host=smtp_host,
+        smtp_port=smtp_port,
+        smtp_ssl=smtp_ssl,
+        smtp_user=smtp_user,
+        smtp_pass_set=smtp_pass_set,
+        email_from=email_from,
+        subject_prefix=subject_prefix,
+        current_username=session.get("username", ""),
+    )
+
+
 @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_password(user_id):
@@ -1549,6 +1767,10 @@ def admin_reset_password(user_id):
         abort(404)
 
     admin_user_id = session["user_id"]
+    if user_id == admin_user_id:
+        flash("不能在管理后台重置自己的密码，请前往个人中心修改", "error")
+        return redirect(url_for("admin_panel"))
+
     admin_user = db.execute("SELECT id, password_hash, role FROM users WHERE id = ?", (admin_user_id,)).fetchone()
     if not admin_user:
         abort(404)
@@ -2911,15 +3133,21 @@ def _poll_all_servers():
                 "checked_at": now,
             }
 
-        # 批量插入告警
+        # 批量插入告警，同时触发邮件推送
+        email_count = 0
         for alert in alerts_to_insert:
+            server_id, user_id, event_type, msg, _ = alert
             db.execute(
                 """INSERT INTO alerts (server_id, user_id, event_type, message, created_at)
                    VALUES (?, ?, ?, ?, ?)""",
                 alert,
             )
+            if send_alert_email(user_id, server_id,
+                              next((r["name"] for r in results if r["server_id"] == server_id), ""),
+                              event_type, msg):
+                email_count += 1
         if alerts_to_insert:
-            logging.info(f"[Scheduler] 生成 {len(alerts_to_insert)} 条告警")
+            logging.info(f"[Scheduler] 生成 {len(alerts_to_insert)} 条告警，发送 {email_count} 封邮件")
 
         db.commit()
         logging.info(f"[Scheduler] 已采集 {len(results)} 台服务器状态")
@@ -3221,13 +3449,31 @@ if __name__ == "__main__":
 
     init_db()
 
-    # 启动后台定时采集调度器
-    _start_scheduler()
+    # Session 密钥持久化：环境变量优先，否则从数据库读取，都没有则生成并存入
+    if not os.environ.get("MCMONITOR_SECRET_KEY"):
+        db = get_db()
+        saved_key = get_setting("secret_key", "")
+        if saved_key:
+            app.config["SECRET_KEY"] = saved_key
+        else:
+            generated = secrets.token_hex(32)
+            set_setting("secret_key", generated)
+            app.config["SECRET_KEY"] = generated
+            print(f"[MC-Monitor] 已生成并保存 Session 密钥到数据库")
+
+    debug_mode = os.environ.get("MCMONITOR_DEBUG", "0") == "1"
+
+    # 启动后台定时采集调度器（reloader 模式下只在子进程中启动，避免重复）
+    is_reloader_child = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if not debug_mode or is_reloader_child:
+        _start_scheduler()
+    else:
+        print("[DEBUG] 热加载监控进程启动，等待子进程...")
 
     host = os.environ.get("MCMONITOR_HOST", "0.0.0.0")
     port = int(os.environ.get("MCMONITOR_PORT", "5000"))
 
-    if IS_PRODUCTION:
+    if IS_PRODUCTION and not debug_mode:
         try:
             from waitress import serve
             serve(app, host=host, port=port, threads=4)
@@ -3235,4 +3481,6 @@ if __name__ == "__main__":
             print("WARNING: waitress not installed, falling back to Flask dev server")
             app.run(host=host, port=port, debug=False, use_reloader=False)
     else:
-        app.run(host=host, port=port, debug=False, use_reloader=False)
+        if debug_mode:
+            print("[DEBUG] 热加载模式已开启，代码修改后自动重启")
+        app.run(host=host, port=port, debug=debug_mode, use_reloader=debug_mode)

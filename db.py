@@ -39,6 +39,31 @@ def _parse_db_url(url=None):
 
 _backend, _dsn = _parse_db_url()
 
+_first_run_admin_info = None
+
+
+def get_first_run_admin_info():
+    """获取首次启动创建的 admin 账号信息，返回 None 表示不是首次启动"""
+    if _first_run_admin_info:
+        return _first_run_admin_info
+    env_val = os.environ.get("_MCMONITOR_FIRST_RUN_ADMIN", "")
+    if env_val:
+        try:
+            import json
+            return json.loads(env_val)
+        except Exception:
+            pass
+    return None
+
+
+def _save_first_run_to_env(info):
+    """将首次启动信息保存到环境变量，方便子进程读取"""
+    try:
+        import json
+        os.environ["_MCMONITOR_FIRST_RUN_ADMIN"] = json.dumps(info)
+    except Exception:
+        pass
+
 # ---------------------------------------------------------------------------
 # 连接管理
 # ---------------------------------------------------------------------------
@@ -59,6 +84,7 @@ def _create_connection():
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA wal_autocheckpoint = 1000")
         return conn
 
     if _backend == "postgresql":
@@ -227,6 +253,8 @@ def init_db(db_path=None):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA wal_autocheckpoint = 1000")
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS users (
@@ -236,6 +264,9 @@ def init_db(db_path=None):
         role TEXT NOT NULL DEFAULT 'user',
         is_admin INTEGER NOT NULL DEFAULT 0,
         minekuai_api_key TEXT,
+        email TEXT,
+        email_alert_enabled INTEGER NOT NULL DEFAULT 0,
+        email_cooldown INTEGER NOT NULL DEFAULT 30,
         created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS servers (
@@ -322,8 +353,9 @@ def init_db(db_path=None):
                 (key, val, now),
             )
 
-    _env = os.environ.get("MCMONITOR_ENV", "development").lower()
-    _bootstrap = os.environ.get("MCMONITOR_BOOTSTRAP_ADMIN", "").strip()
+    global _first_run_admin_info
+
+    _bs_pass = os.environ.get("MCMONITOR_BOOTSTRAP_PASSWORD", "").strip()
 
     # 检查是否已有用户
     has_users = False
@@ -333,30 +365,30 @@ def init_db(db_path=None):
     except Exception:
         pass
 
-    if _bootstrap == "1":
-        # 通过环境变量显式配置管理员
-        _bs_user = os.environ.get("MCMONITOR_BOOTSTRAP_USERNAME", "admin").strip()
-        _bs_pass = os.environ.get("MCMONITOR_BOOTSTRAP_PASSWORD", "").strip()
-        if _bs_pass and len(_bs_pass) >= 8:
-            try:
-                existing = conn.execute("SELECT id FROM users WHERE username = ?", (_bs_user,)).fetchone()
-                if not existing:
-                    import hashlib, secrets
-                    salt = secrets.token_hex(16)
-                    digest = hashlib.pbkdf2_hmac("sha256", _bs_pass.encode(), salt.encode(), 200000).hex()
-                    pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
-                    conn.execute(
-                        "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
-                        (_bs_user, pw_hash, now),
-                    )
-                    print(f"[MC-Monitor] 已通过环境变量创建管理员账号: {_bs_user}")
-            except Exception as e:
-                print(f"[MC-Monitor] 创建管理员失败: {e}")
+    if _bs_pass and len(_bs_pass) >= 8:
+        try:
+            existing = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
+            if not existing:
+                import hashlib, secrets
+                salt = secrets.token_hex(16)
+                digest = hashlib.pbkdf2_hmac("sha256", _bs_pass.encode(), salt.encode(), 200000).hex()
+                pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
+                    ("admin", pw_hash, now),
+                )
+                _first_run_admin_info = {
+                    "username": "admin",
+                    "password": _bs_pass,
+                    "type": "bootstrap",
+                }
+                _save_first_run_to_env(_first_run_admin_info)
+        except Exception as e:
+            print(f"[MC-Monitor] 创建管理员失败: {e}")
     elif not has_users:
-        # 数据库为空，自动创建临时管理员并打印密码
         import hashlib, secrets
         temp_user = "admin"
-        temp_pass = secrets.token_urlsafe(12)  # 生成 16 位随机密码
+        temp_pass = secrets.token_urlsafe(12)
         salt = secrets.token_hex(16)
         digest = hashlib.pbkdf2_hmac("sha256", temp_pass.encode(), salt.encode(), 200000).hex()
         pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
@@ -365,16 +397,12 @@ def init_db(db_path=None):
                 "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
                 (temp_user, pw_hash, now),
             )
-            print("")
-            print("=" * 60)
-            print("  [MC-Monitor] 首次启动，已自动创建临时管理员账号")
-            print("=" * 60)
-            print(f"  用户名: {temp_user}")
-            print(f"  密  码: {temp_pass}")
-            print("-" * 60)
-            print("  ⚠️  请立即登录并修改密码！此密码仅显示一次。")
-            print("=" * 60)
-            print("")
+            _first_run_admin_info = {
+                "username": temp_user,
+                "password": temp_pass,
+                "type": "temporary",
+            }
+            _save_first_run_to_env(_first_run_admin_info)
         except Exception as e:
             print(f"[MC-Monitor] 创建临时管理员失败: {e}")
 

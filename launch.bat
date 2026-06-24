@@ -1,4 +1,4 @@
-﻿
+
 @echo off
 @echo off
 chcp 65001 >nul
@@ -205,6 +205,7 @@ echo ============================================================
 echo.
 
 set "PYTHONPATH=%PROJECT_DIR%;%PYTHONPATH%"
+set MCMONITOR_DEBUG=1
 "%PY_EXE%" "%PROJECT_DIR%main.py"
 
 echo.

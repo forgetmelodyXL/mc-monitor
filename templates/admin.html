@@ -155,6 +155,81 @@
         </div>
     </section>
 
+    <section class="card">
+        <div class="card-header">
+            <h2>📧 邮件告警配置</h2>
+            <p class="hint">配置 SMTP 服务器后，用户可在个人中心开启邮件告警通知</p>
+        </div>
+
+        <form method="POST" action="{{ url_for('admin_email_settings') }}" class="add-server-form" style="margin-bottom: 16px;">
+            {{ csrf_input() }}
+            <input type="hidden" name="action" value="save">
+            <div class="setting-card">
+                <div class="setting-row">
+                    <div>
+                        <h3 class="setting-title">邮件告警开关</h3>
+                        <p class="setting-desc">{% if email_enabled %}已开启 - 用户可接收邮件告警{% else %}已关闭 - 所有邮件推送停止{% endif %}</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" name="email_enabled" {% if email_enabled %}checked{% endif %}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+                <div class="form-group">
+                    <label>SMTP 服务器</label>
+                    <input type="text" name="smtp_host" value="{{ smtp_host }}" placeholder="smtp.qq.com">
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label>端口</label>
+                        <input type="number" name="smtp_port" value="{{ smtp_port }}" placeholder="465">
+                    </div>
+                    <div class="form-group" style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end;">
+                        <label style="margin-bottom: 6px;">
+                            <input type="checkbox" name="smtp_ssl" {% if smtp_ssl %}checked{% endif %}>
+                            &nbsp;SSL/TLS
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row" style="margin-top: 4px;">
+                <div class="form-group">
+                    <label>SMTP 用户名</label>
+                    <input type="text" name="smtp_user" value="{{ smtp_user }}" placeholder="user@example.com">
+                </div>
+                <div class="form-group">
+                    <label>SMTP 密码{% if smtp_pass_set %}（已设置）{% endif %}</label>
+                    <input type="password" name="smtp_password" placeholder="{% if smtp_pass_set %}留空表示不修改{% else %}授权码/密码{% endif %}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>发件人地址</label>
+                    <input type="text" name="email_from" value="{{ email_from }}" placeholder="noreply@example.com">
+                </div>
+                <div class="form-group">
+                    <label>邮件标题前缀</label>
+                    <input type="text" name="subject_prefix" value="{{ subject_prefix }}" placeholder="[MC监控]">
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
+                <input type="email" name="test_email" placeholder="测试收件邮箱" style="padding: 8px 12px; border: 1px solid #d0d5e8; border-radius: 8px; font-size: 13px; width: 220px;">
+                <button type="submit" formaction="{{ url_for('admin_email_settings') }}" name="action" value="test" class="btn btn-outline btn-sm">发送测试</button>
+            </div>
+            <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 12px;">
+                <button type="submit" class="btn btn-primary">保存配置</button>
+            </div>
+        </form>
+
+        <p class="hint">💡 常用邮箱：QQ 邮箱 smtp.qq.com:465 (SSL) / 163 邮箱 smtp.163.com:465 (SSL)，密码需使用"授权码"而非登录密码</p>
+    </section>
+
     <section class="stats-row">
         <div class="stat-card">
             <div class="stat-label">用户总数</div>
