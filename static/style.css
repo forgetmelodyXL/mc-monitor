@@ -172,6 +172,77 @@ a:hover { text-decoration: underline; }
     font-size: 13px;
 }
 
+.user-dropdown {
+    position: relative;
+}
+.user-dropdown-btn {
+    background: rgba(255, 255, 255, 0.15);
+    border: none;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.user-dropdown:hover .user-dropdown-btn {
+    background: rgba(255, 255, 255, 0.25);
+}
+.user-dropdown:hover .user-dropdown-menu {
+    display: block;
+}
+.user-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    min-width: 180px;
+    background: #fff;
+    border: 1px solid #e6e8f3;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    z-index: 1000;
+    padding: 6px 0;
+    display: none;
+    margin-top: 8px;
+}
+.user-dropdown-menu::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: 0;
+    right: 0;
+    height: 8px;
+    background: transparent;
+}
+.user-dropdown-item {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #2a2e5b;
+    text-decoration: none;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+}
+.user-dropdown-item:hover {
+    background: #f0f3fb;
+}
+.user-dropdown-item-logout {
+    color: #e35d5d;
+}
+.user-dropdown-item-logout:hover {
+    background: #fef0f0;
+}
+.user-dropdown-divider {
+    height: 1px;
+    background: #e6e8f3;
+    margin: 6px 0;
+}
+
 .container {
     max-width: 1180px;
     margin: 0 auto;
@@ -829,6 +900,14 @@ body.dark-mode .topbar {
 }
 body.dark-mode .brand-text { color: var(--dm-text); }
 body.dark-mode .user-tag { background: rgba(108, 141, 255, 0.2); color: var(--dm-text); }
+body.dark-mode .user-dropdown-btn { background: rgba(108, 141, 255, 0.2); color: var(--dm-text); }
+body.dark-mode .user-dropdown-btn:hover { background: rgba(108, 141, 255, 0.35); }
+body.dark-mode .user-dropdown-menu { background: var(--dm-card-bg); border-color: var(--dm-border); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+body.dark-mode .user-dropdown-item { color: var(--dm-text); }
+body.dark-mode .user-dropdown-item:hover { background: rgba(108, 141, 255, 0.15); }
+body.dark-mode .user-dropdown-item-logout { color: #ff8a8a; }
+body.dark-mode .user-dropdown-item-logout:hover { background: rgba(227, 93, 93, 0.15); }
+body.dark-mode .user-dropdown-divider { background: var(--dm-border); }
 body.dark-mode .btn-outline {
     border-color: rgba(255, 255, 255, 0.3);
     color: var(--dm-text);

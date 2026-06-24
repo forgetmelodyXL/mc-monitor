@@ -586,6 +586,7 @@ def metrics():
         success_rate=success_rate, avg_latency=avg_latency,
         fail_count_24h=fail_count_24h, check_count_24h=check_count_24h,
         servers=servers, recent_fails=recent_fails, roles=db_module.ROLES,
+        username=session.get("username", ""),
     )
 
 
@@ -1318,7 +1319,71 @@ def maintenance():
     return render_template("maintenance.html")
 
 
-@app.route("/logout")
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def user_profile():
+    db = get_db()
+    _ensure_schema(db)
+    user = db.execute(
+        "SELECT id, username, created_at FROM users WHERE id = ?",
+        (session["user_id"],),
+    ).fetchone()
+    if not user:
+        abort(404)
+    error = None
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "change_username":
+            new_username = (request.form.get("new_username") or "").strip()
+            if len(new_username) < 3 or len(new_username) > 32:
+                error = "用户名长度必须在 3-32 个字符之间"
+            else:
+                existing = db.execute(
+                    "SELECT id FROM users WHERE username = ? AND id != ?",
+                    (new_username, session["user_id"]),
+                ).fetchone()
+                if existing:
+                    error = "该用户名已被占用"
+                else:
+                    db.execute(
+                        "UPDATE users SET username = ? WHERE id = ?",
+                        (new_username, session["user_id"]),
+                    )
+                    db.commit()
+                    session["username"] = new_username
+                    flash("用户名已更新，请重新登录", "success")
+                    _audit("profile_change_username", f"new_username={new_username}")
+                    session.clear()
+                    return redirect(url_for("login"))
+        elif action == "change_password":
+            current_password = request.form.get("current_password") or ""
+            new_password = (request.form.get("new_password") or "").strip()
+            confirm_password = request.form.get("confirm_password") or ""
+            if len(new_password) < 8:
+                error = "新密码长度至少 8 个字符"
+            elif new_password != confirm_password:
+                error = "两次输入的新密码不一致"
+            else:
+                user_full = db.execute(
+                    "SELECT password_hash FROM users WHERE id = ?",
+                    (session["user_id"],),
+                ).fetchone()
+                if not verify_password(user_full["password_hash"], current_password):
+                    error = "当前密码不正确"
+                else:
+                    db.execute(
+                        "UPDATE users SET password_hash = ? WHERE id = ?",
+                        (hash_password(new_password), session["user_id"]),
+                    )
+                    db.commit()
+                    flash("密码已更新，请重新登录", "success")
+                    _audit("profile_change_password", "password changed")
+                    session.clear()
+                    return redirect(url_for("login"))
+    return render_template("profile.html", user=user, error=error, username=session.get("username", ""))
+
+
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     _audit("logout")
     session.clear()
@@ -1468,12 +1533,12 @@ def admin_run_cleanup():
 @admin_required
 def admin_reset_password(user_id):
     db = get_db()
-    user = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
 
     admin_user_id = session["user_id"]
-    admin_user = db.execute("SELECT id, password_hash FROM users WHERE id = ?", (admin_user_id,)).fetchone()
+    admin_user = db.execute("SELECT id, password_hash, role FROM users WHERE id = ?", (admin_user_id,)).fetchone()
     if not admin_user:
         abort(404)
 
@@ -1484,6 +1549,12 @@ def admin_reset_password(user_id):
 
     if not verify_password(admin_current_password, admin_user["password_hash"]):
         flash("管理员密码错误", "error")
+        return redirect(url_for("admin_panel"))
+
+    actor_role = row_get(admin_user, "role", "user")
+    target_role = row_get(user, "role", "user")
+    if not db_module.can_manage_role(actor_role, target_role):
+        flash("你不能重置级别不低于你的用户的密码", "error")
         return redirect(url_for("admin_panel"))
 
     if user["username"] == "admin" and not request.form.get("confirm_admin"):
@@ -1514,8 +1585,16 @@ def admin_toggle_admin(user_id):
     if user["username"] == "admin":
         flash("不能修改默认管理员 admin 的身份", "error")
         return redirect(url_for("admin_panel"))
-    current_role = row_get(user, "role", "user")
+    actor_role = session.get("role", "user")
+    target_role = row_get(user, "role", "user")
+    if not db_module.can_manage_role(actor_role, target_role):
+        flash("你不能管理该用户的角色", "error")
+        return redirect(url_for("admin_panel"))
+    current_role = target_role
     new_role = "admin" if current_role not in ("admin", "super_admin") else "user"
+    if new_role == "admin" and not db_module.can_manage_role(actor_role, new_role):
+        flash("你不能将用户升级到超过你自身级别的角色", "error")
+        return redirect(url_for("admin_panel"))
     new_is_admin = 1 if new_role in ("admin", "super_admin") else 0
     db.execute("UPDATE users SET is_admin = ?, role = ? WHERE id = ?", (new_is_admin, new_role, user_id))
     db.commit()
@@ -1558,7 +1637,7 @@ def admin_set_role(user_id):
 @admin_required
 def admin_delete_user(user_id):
     db = get_db()
-    user = db.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
     if user["username"] == "admin":
@@ -1566,6 +1645,11 @@ def admin_delete_user(user_id):
         return redirect(url_for("admin_panel"))
     if int(user_id) == int(session.get("user_id", 0)):
         flash("不能删除自己的账号", "error")
+        return redirect(url_for("admin_panel"))
+    actor_role = session.get("role", "user")
+    target_role = row_get(user, "role", "user")
+    if not db_module.can_manage_role(actor_role, target_role):
+        flash("你不能删除级别不低于你的用户", "error")
         return redirect(url_for("admin_panel"))
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     db.commit()
@@ -1628,54 +1712,6 @@ def admin_edit_server(server_id):
     db.commit()
     _audit("admin_edit_server", f"edited server: {name}")
     flash(f"服务器 {name} 已更新", "success")
-    return redirect(url_for("admin_panel"))
-
-
-@app.route("/admin/users/<int:user_id>/create-server", methods=["POST"])
-@admin_required
-def admin_create_server_for_user(user_id):
-    db = get_db()
-    user = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        abort(404)
-    name = (request.form.get("name") or "").strip()
-    host = (request.form.get("host") or "").strip()
-    port_str = (request.form.get("port") or "").strip()
-    is_public = 1 if request.form.get("is_public") else 0
-    try:
-        port = int(port_str)
-        if port <= 0 or port > 65535:
-            raise ValueError
-    except ValueError:
-        flash("端口必须是 1-65535 之间的整数", "error")
-        return redirect(url_for("admin_panel"))
-    if not name or not host:
-        flash("名称和主机不能为空", "error")
-        return redirect(url_for("admin_panel"))
-    db.execute(
-        "INSERT INTO servers (user_id, name, host, port, is_public, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, name[:64], host[:253], port, is_public,
-         datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
-    )
-    db.commit()
-    _audit("admin_create_server", f"created server: {name} for user_id={user_id}")
-    flash(f"已为用户添加服务器: {name}", "success")
-    return redirect(url_for("admin_panel"))
-
-
-@app.route("/admin/change-my-password", methods=["POST"])
-@admin_required
-def admin_change_own_password():
-    """管理员修改自己密码（避免默认 admin/admin 暴露）"""
-    new_password = (request.form.get("new_password") or "").strip()
-    if len(new_password) < 6:
-        flash("新密码长度至少 6 个字符", "error")
-        return redirect(url_for("admin_panel"))
-    db = get_db()
-    db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
-               (hash_password(new_password), session["user_id"]))
-    db.commit()
-    flash("您的密码已更新，请牢记", "success")
     return redirect(url_for("admin_panel"))
 
 

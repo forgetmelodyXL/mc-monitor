@@ -18,11 +18,26 @@
         </div>
         <div class="topbar-right">
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
-            <span class="user-tag">{{ current_username }} · 管理员</span>
-            <a href="{{ url_for('metrics') }}" class="btn btn-sm btn-outline">监控指标</a>
             <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline">公共主页</a>
-            <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">我的管理</a>
-            <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">退出</a>
+            <div class="user-dropdown">
+                <button class="user-dropdown-btn user-tag">{{ current_username }} · 管理员 ▾</button>
+                <div class="user-dropdown-menu">
+                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
+                    {% if session.is_admin %}
+                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
+                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
+                    {% endif %}
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
+                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
+                    <div class="user-dropdown-divider"></div>
+                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
+                        {{ csrf_input() }}
+                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
+                            🚪 注销
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </header>
@@ -158,18 +173,6 @@
         </div>
     </section>
 
-    <!-- 管理员修改自己密码 -->
-    <section class="card">
-        <h2>🔐 修改自己的密码（防止默认 admin/admin 被访问）</h2>
-        <form method="POST" action="{{ url_for('admin_change_own_password') }}" class="add-server-form">
-            {{ csrf_input() }}
-            <div class="form-row">
-                <input type="password" name="new_password" placeholder="新密码 (至少 6 位)" required style="flex: 1;">
-                <button type="submit" class="btn btn-primary">更新我的密码</button>
-            </div>
-        </form>
-    </section>
-
     <!-- 用户列表 -->
     <section class="card">
         <h2>👥 用户列表（共 {{ total_users }} 个）</h2>
@@ -246,20 +249,6 @@
                                 </button>
                             </form>
                             {% endif %}
-
-                            <!-- 为用户添加服务器 -->
-                            <details style="margin-top: 4px;">
-                                <summary style="cursor: pointer; color: #3b5bdb;">➕ 为该用户添加服务器</summary>
-                                <form method="POST" action="{{ url_for('admin_create_server_for_user', user_id=u.id) }}"
-                                      class="add-server-form" style="padding: 8px 0; gap: 6px;">
-                                    {{ csrf_input() }}
-                                    <input type="text" name="name" placeholder="名称" required>
-                                    <input type="text" name="host" placeholder="主机/IP" required>
-                                    <input type="number" name="port" placeholder="端口" min="1" max="65535" value="25565" required>
-                                    <label><input type="checkbox" name="is_public"> 设为公开</label>
-                                    <button type="submit" class="btn btn-primary btn-sm">添加</button>
-                                </form>
-                            </details>
 
                             <!-- 删除用户 (不能删除 admin 和自己) -->
                             {% if u.username != 'admin' %}

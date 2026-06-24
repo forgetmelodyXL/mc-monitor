@@ -19,28 +19,27 @@
             <span class="brand-text">MC 服务器监控</span>
         </div>
         <div class="topbar-right">
-            <!-- 告警铃铛 -->
-            <div class="alerts-wrapper" style="position: relative;">
-                <button class="alerts-bell" id="alertsBell" title="告警通知" style="background: transparent; border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 5px;">
-                    🔔
-                    <span class="alerts-badge hidden" id="alertsBadge" style="background: #e35d5d; color: #fff; border-radius: 10px; padding: 1px 5px; font-size: 11px; min-width: 18px; text-align: center; line-height: 16px;">0</span>
-                </button>
-                <div class="alerts-dropdown hidden" id="alertsDropdown" style="position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-height: 400px; overflow-y: auto; background: #fff; border: 1px solid #e6e8f3; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 1000;">
-                    <div style="padding: 12px 16px; border-bottom: 1px solid #e6e8f3; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-weight: 600; color: #2a2e5b; font-size: 14px;">告警通知</span>
-                        <button type="button" id="ackAllAlerts" style="background: transparent; border: none; color: #6c8dff; cursor: pointer; font-size: 12px; padding: 0;">全部已读</button>
-                    </div>
-                    <div id="alertsList"><!-- 动态加载 --></div>
-                </div>
-            </div>
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
-            <a href="{{ url_for('alerts_history') }}" class="btn btn-outline btn-sm">📜 历史告警</a>
-            {% if session.is_admin %}
-                <a href="{{ url_for('admin_panel') }}" class="btn btn-sm" style="background:#e44;color:white;">🛡 管理后台</a>
-            {% endif %}
-            <span class="user-tag">{{ username }}</span>
-            <a href="{{ url_for('logout') }}" class="btn btn-outline btn-sm">退出</a>
+            <div class="user-dropdown">
+                <button class="user-dropdown-btn user-tag">{{ username }} ▾</button>
+                <div class="user-dropdown-menu" id="userDropdownMenu">
+                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
+                    {% if session.is_admin %}
+                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
+                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
+                    {% endif %}
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
+                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
+                    <div class="user-dropdown-divider"></div>
+                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
+                        {{ csrf_input() }}
+                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
+                            🚪 注销
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </header>
@@ -152,7 +151,13 @@
     <section class="card">
         <div class="card-header">
             <h2>麦块联机 API Key</h2>
-            <span class="hint">每位用户独立绑定；仅您可使用</span>
+            <span class="hint">
+                每位用户独立绑定；仅您可使用
+                <a href="https://minekuai.com/account/api" target="_blank" rel="noopener noreferrer"
+                   style="margin-left: 8px; text-decoration: none; color: #5b6ee1;">
+                    🔗 获取 API Key
+                </a>
+            </span>
         </div>
         <form class="add-server-form" method="POST" action="{{ url_for('minekuai_bind_key') }}">
             {{ csrf_input() }}
@@ -520,7 +525,9 @@
 
             // 延迟
             row.querySelector('.meta-latency').textContent =
-                (info.latency_ms === null || info.latency_ms === undefined) ? '—' : info.latency_ms + ' ms';
+                (info.online && info.latency_ms !== null && info.latency_ms !== undefined)
+                    ? info.latency_ms + ' ms'
+                    : '—';
 
             // MOTD
             const motd = row.querySelector('.motd-content');
@@ -761,7 +768,7 @@
         if (!currentMkServerId) return;
         const val = (mkInstanceId.value || '').trim();
         const row = document.querySelector('.server-row[data-server-id="' + currentMkServerId + '"]');
-        const url = '/server/' + currentMkServerId + '/bind_minekuai_instance';
+        const url = '/server/' + currentMkServerId + '/bind-instance';
         if (mkBindBtn) { mkBindBtn.disabled = true; mkBindBtn.textContent = '⏳ 保存中…'; }
         try {
             const formData = new FormData();

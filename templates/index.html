@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="dashboard-body">
+{% from "base.html" import csrf_input with context %}
 {% set _ = get_flashed_messages(with_categories=true) %}
 
 <header class="topbar">
@@ -18,12 +19,25 @@
         <div class="topbar-right">
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             {% if logged_in %}
-                {% if session.is_admin %}
-                    <a href="{{ url_for('admin_panel') }}" class="btn btn-sm" style="background:#e44;color:white;">🛡 管理后台</a>
-                {% endif %}
-                <span class="user-tag">{{ current_username }}</span>
-                <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-primary">我的管理</a>
-                <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">退出</a>
+                <div class="user-dropdown">
+                    <button class="user-dropdown-btn user-tag">{{ current_username }} ▾</button>
+                    <div class="user-dropdown-menu">
+                        <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
+                        {% if session.is_admin %}
+                            <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
+                            <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
+                        {% endif %}
+                        <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
+                        <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
+                        <div class="user-dropdown-divider"></div>
+                        <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
+                            {{ csrf_input() }}
+                            <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
+                                🚪 注销
+                            </button>
+                        </form>
+                    </div>
+                </div>
             {% else %}
                 <a href="{{ url_for('login') }}" class="btn btn-sm btn-primary">登录</a>
                 <a href="{{ url_for('register') }}" class="btn btn-sm btn-outline">注册</a>
@@ -182,7 +196,9 @@
                 : info.players_online + ' / ' + (info.players_max ?? '?');
             card.querySelector('.meta-players').textContent = playersText;
             card.querySelector('.meta-latency').textContent =
-                (info.latency_ms === null || info.latency_ms === undefined) ? '—' : info.latency_ms + ' ms';
+                (info.online && info.latency_ms !== null && info.latency_ms !== undefined)
+                    ? info.latency_ms + ' ms'
+                    : '—';
 
             const motd = card.querySelector('.motd-content');
             motd.textContent = (info.online && info.motd) ? info.motd : '—';
