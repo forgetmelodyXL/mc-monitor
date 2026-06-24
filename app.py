@@ -444,6 +444,17 @@ def ensure_csrf_token():
 
 
 # ============================================================
+# 版本信息 & 模板上下文
+# ============================================================
+APP_VERSION = "1.1.3"
+
+
+@app.context_processor
+def inject_version():
+    return {"app_version": APP_VERSION}
+
+
+# ============================================================
 # 错误页面 & Favicon
 # ============================================================
 @app.route("/favicon.ico")
@@ -2315,59 +2326,6 @@ def api_status():
         "offline": len(results) - total_online,
         "total_players": total_players,
     })
-
-
-@app.route("/api/test", methods=["POST"])
-@login_required
-def api_test():
-    """手动测试某个服务器的 API。返回完整的协议诊断和原始 JSON。"""
-    data_source = request.json if request.is_json else request.form
-    host = (data_source.get("host") or "").strip()
-    port_str = (data_source.get("port") or "").strip()
-    protocol = (data_source.get("protocol") or "java").strip().lower()
-    if protocol not in ("java", "bedrock", "http", "tcp"):
-        protocol = "java"
-    try:
-        port = int(port_str)
-        if not (0 < port < 65536):
-            raise ValueError()
-    except (ValueError, TypeError):
-        return jsonify({
-            "error": "端口必须是 1-65535 之间的整数",
-            "online": False,
-            "diagnostics": ["[参数错误] 端口无效"],
-            "elapsed_ms": 0,
-        }), 400
-    if not host:
-        return jsonify({
-            "error": "主机名不能为空",
-            "online": False,
-            "diagnostics": ["[参数错误] 主机名不能为空"],
-            "elapsed_ms": 0,
-        }), 400
-
-    if protocol == "http":
-        result = ping_http_server(host, timeout=5.0)
-        result["host"] = host
-        result["port"] = 0
-        result["diagnostics"] = [f"[HTTP] 目标: {host}"]
-        return jsonify(result)
-    elif protocol == "tcp":
-        result = ping_tcp_server(host, port, timeout=3.0)
-        result["host"] = host
-        result["port"] = port
-        result["diagnostics"] = [f"[TCP] 目标: {host}:{port}"]
-        return jsonify(result)
-    elif protocol == "bedrock":
-        result = ping_with_timeout_bedrock(host, port, overall_timeout=15.0, step_timeout=5.0)
-        result["host"] = host
-        result["port"] = port
-        return jsonify(result)
-    else:
-        result = ping_with_timeout(host, port, overall_timeout=15.0, step_timeout=5.0)
-        result["host"] = host
-        result["port"] = port
-        return jsonify(result)
 
 
 @app.route("/api/server/<int:server_id>/history")

@@ -17,6 +17,7 @@
         <div class="brand">
             <span class="brand-icon">⛏</span>
             <span class="brand-text">MC 服务器监控</span>
+            <span class="brand-version">v{{ app_version }}</span>
         </div>
         <div class="topbar-right">
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
@@ -172,53 +173,6 @@
             </div>
             <p class="hint">留空提交则清除已绑定的密钥。密钥仅保存在本机数据库并通过 HTTPS 以 Authorization: Bearer 方式发送给 minekuai.com。</p>
         </form>
-    </section>
-
-    <section class="card">
-        <div class="card-header">
-            <h2>测试连接 / 协议诊断</h2>
-            <span class="hint">输入任意 MC Java 服务器地址，查看完整的协议诊断结果</span>
-        </div>
-        <form class="add-server-form" id="testForm" onsubmit="return false;">
-            <div class="form-row">
-                <div class="form-group">
-                    <label>协议</label>
-                    <select id="testProtocol" style="padding: 7px 10px; border: 1px solid #d0d6e8; border-radius: 6px; font-size: 13px;">
-                        <option value="java">Java SLP</option>
-                        <option value="bedrock">Bedrock</option>
-                        <option value="http">HTTP(s)</option>
-                        <option value="tcp">TCP 端口</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>地址 (Host)</label>
-                    <input type="text" id="testHost" placeholder="如：s4.ungc.com.cn" required maxlength="253">
-                </div>
-                <div class="form-group form-group-port">
-                    <label>端口</label>
-                    <input type="number" id="testPort" value="25565" min="1" max="65535" required>
-                </div>
-                <div class="form-group form-group-action">
-                    <button type="button" id="testBtn" class="btn btn-primary">🔍 测试</button>
-                </div>
-            </div>
-        </form>
-        <div id="testResult" class="test-result hidden">
-            <div class="test-result-header">
-                <span id="testStatus" class="server-status">—</span>
-                <span id="testElapsed" class="hint">—</span>
-            </div>
-            <div class="test-info">
-                <div><span class="meta-label">版本：</span><span id="testVersion">—</span></div>
-                <div><span class="meta-label">玩家：</span><span id="testPlayers">—</span></div>
-                <div><span class="meta-label">MOTD：</span><span id="testMotd">—</span></div>
-            </div>
-            <div id="testDiag" class="test-diag"></div>
-            <details id="testRawWrap" class="test-raw">
-                <summary>查看原始 JSON 响应</summary>
-                <pre id="testRaw">—</pre>
-            </details>
-        </div>
     </section>
 
     <section class="card">
@@ -476,13 +430,10 @@
 <script>
 (function () {
     const API_STATUS = "{{ url_for('api_status') }}";
-    const API_TEST = "{{ url_for('api_test') }}";
     const refreshBtn = document.getElementById('refreshBtn');
     const autoRefreshEl = document.getElementById('autoRefresh');
     const lastRefreshEl = document.getElementById('lastRefresh');
-    const FRONTEND_TIMEOUT_MS = 18000;
     let autoTimer = null;
-    let currentTestController = null;
 
     function fmtTime(d) {
         return d.toLocaleString('zh-CN', { hour12: false });
@@ -1015,123 +966,6 @@
         }
     }
 
-    // ---- 测试连接 ----
-    const testBtn = document.getElementById('testBtn');
-    const testHost = document.getElementById('testHost');
-    const testPort = document.getElementById('testPort');
-    const testResult = document.getElementById('testResult');
-    const testStatus = document.getElementById('testStatus');
-    const testElapsed = document.getElementById('testElapsed');
-    const testVersion = document.getElementById('testVersion');
-    const testPlayers = document.getElementById('testPlayers');
-    const testMotd = document.getElementById('testMotd');
-    const testDiag = document.getElementById('testDiag');
-    const testRaw = document.getElementById('testRaw');
-
-    async function runTest() {
-        const host = (testHost.value || '').trim();
-        const portRaw = (testPort.value || '').trim();
-        const protocol = (document.getElementById('testProtocol').value || 'java').trim();
-        const port = parseInt(portRaw, 10);
-        if (!host || !port || port <= 0 || port >= 65536) {
-            testStatus.textContent = '请输入有效的主机和端口';
-            testStatus.className = 'server-status status-offline';
-            testResult.classList.remove('hidden');
-            return;
-        }
-
-        if (currentTestController) {
-            currentTestController.abort('用户重新点击了测试按钮');
-        }
-        const controller = new AbortController();
-        currentTestController = controller;
-
-        testBtn.disabled = true;
-        testBtn.textContent = '测试中…';
-        testStatus.className = 'server-status status-loading';
-        testStatus.textContent = '● 测试中…';
-        testElapsed.textContent = '';
-        testVersion.textContent = '—';
-        testPlayers.textContent = '—';
-        testMotd.textContent = '—';
-        testDiag.innerHTML = '';
-        testRaw.textContent = '—';
-        testResult.classList.remove('hidden');
-
-        try {
-            const body = new FormData();
-            body.append('host', host);
-            body.append('port', String(port));
-            body.append('protocol', protocol);
-
-            const timerId = setTimeout(() => {
-                controller.abort('前端超时 ' + (FRONTEND_TIMEOUT_MS / 1000) + 's：服务器响应太慢或本机无法连接。');
-            }, FRONTEND_TIMEOUT_MS);
-
-            let info;
-            try {
-                const res = await fetch(API_TEST, {
-                    method: 'POST',
-                    body: body,
-                    cache: 'no-store',
-                    signal: controller.signal,
-                    headers: { 'X-CSRF-Token': getCsrfToken() },
-                });
-                clearTimeout(timerId);
-                if (!res.ok) {
-                    throw new Error('HTTP ' + res.status);
-                }
-                info = await res.json();
-            } catch (fetchErr) {
-                clearTimeout(timerId);
-                if (fetchErr.name === 'AbortError') {
-                    throw new Error(fetchErr.message || '请求超时');
-                }
-                throw fetchErr;
-            }
-
-            if (info.online) {
-                testStatus.className = 'server-status status-online';
-                testStatus.textContent = '● 在线';
-            } else {
-                testStatus.className = 'server-status status-offline';
-                testStatus.textContent = '● 连接失败';
-            }
-            testElapsed.textContent = '耗时 ' + (info.elapsed_ms || 0) + ' ms';
-            testVersion.textContent = info.version || '—';
-            testPlayers.textContent =
-                (info.players_online === null || info.players_online === undefined)
-                    ? '—'
-                    : info.players_online + ' / ' + (info.players_max ?? '?');
-            testMotd.textContent = info.motd || '—';
-
-            const diagBox = document.createElement('div');
-            (info.diagnostics || []).forEach(d => {
-                const line = document.createElement('div');
-                line.textContent = d;
-                diagBox.appendChild(line);
-            });
-            if (info.error) {
-                const line = document.createElement('div');
-                line.className = 'diag-error';
-                line.textContent = '错误: ' + info.error;
-                diagBox.appendChild(line);
-            }
-            testDiag.innerHTML = '';
-            testDiag.appendChild(diagBox);
-
-            testRaw.textContent = JSON.stringify(info.raw_json || info, null, 2);
-        } catch (e) {
-            testStatus.className = 'server-status status-offline';
-            testStatus.textContent = '● ' + e.message;
-        } finally {
-            currentTestController = null;
-            testBtn.disabled = false;
-            testBtn.textContent = '🔍 测试';
-        }
-    }
-
-    if (testBtn) testBtn.addEventListener('click', runTest);
     if (refreshBtn) refreshBtn.addEventListener('click', refresh);
     if (autoRefreshEl) autoRefreshEl.addEventListener('change', setupAuto);
 
