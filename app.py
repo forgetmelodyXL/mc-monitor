@@ -1761,8 +1761,8 @@ def admin_email_settings():
 @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_password(user_id):
-    db = get_db()
-    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn = get_db()
+    user = conn.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
 
@@ -1844,8 +1844,8 @@ def admin_set_role(user_id):
     if new_role not in db_module.ROLES:
         flash("无效的角色", "error")
         return redirect(url_for("admin_panel"))
-    db = get_db()
-    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn = get_db()
+    user = conn.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
     if user["username"] == "admin" and new_role != "super_admin":
@@ -1859,8 +1859,8 @@ def admin_set_role(user_id):
         flash("你不能管理该用户的角色", "error")
         return redirect(url_for("admin_panel"))
     is_admin = 1 if new_role in ("admin", "super_admin") else 0
-    db.execute("UPDATE users SET role = ?, is_admin = ? WHERE id = ?", (new_role, is_admin, user_id))
-    db.commit()
+    conn.execute("UPDATE users SET role = ?, is_admin = ? WHERE id = ?", (new_role, is_admin, user_id))
+    conn.commit()
     _audit("admin_set_role", f"target: {user['username']} -> {new_role}")
     flash(f"已将用户 {user['username']} 设为{db_module.get_role_label(new_role)}", "success")
     return redirect(url_for("admin_panel"))
@@ -3459,7 +3459,7 @@ if __name__ == "__main__":
             generated = secrets.token_hex(32)
             set_setting("secret_key", generated)
             app.config["SECRET_KEY"] = generated
-            print(f"[MC-Monitor] 已生成并保存 Session 密钥到数据库")
+            print("[MC-Monitor] 已生成并保存 Session 密钥到数据库")
 
     debug_mode = os.environ.get("MCMONITOR_DEBUG", "0") == "1"
 
