@@ -27,8 +27,8 @@
     <form class="auth-form" method="POST">
         {{ csrf_input() }}
         <div class="form-group">
-            <label for="username">用户名</label>
-            <input type="text" id="username" name="username" required autocomplete="username" autofocus>
+            <label for="username">用户名 / 邮箱</label>
+            <input type="text" id="username" name="username" required autocomplete="username" autofocus placeholder="用户名或邮箱">
         </div>
         <div class="form-group">
             <label for="password">密码</label>
@@ -75,6 +75,34 @@
     });
 
     init();
+})();
+
+// ---- 按钮点击反馈 ----
+(function () {
+    function showToast(msg, type) {
+        var c = document.getElementById('toastContainer');
+        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'info');
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        c.appendChild(t);
+        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
+    }
+
+    document.addEventListener('submit', function (e) {
+        var btn = e.target.querySelector('button[type="submit"]');
+        if (!btn || btn.classList.contains('btn-saving')) return;
+        btn.classList.add('btn-saving');
+        btn.textContent = '登录中...';
+    });
+
+    var flashes = document.querySelectorAll('.flash');
+    flashes.forEach(function (f) {
+        var isError = f.classList.contains('flash-error');
+        showToast(f.textContent.trim(), isError ? 'error' : 'success');
+        f.style.display = 'none';
+    });
 })();
 </script>
 </body>

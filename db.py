@@ -358,54 +358,58 @@ def init_db(db_path=None):
 
     _bs_pass = os.environ.get("MCMONITOR_BOOTSTRAP_PASSWORD", "").strip()
 
-    # 检查是否已有用户
-    has_users = False
+    # 检查是否已有超级管理员
+    has_super_admin = False
     try:
-        existing_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()
-        has_users = existing_count and existing_count[0] > 0
+        existing_sa = conn.execute("SELECT id FROM users WHERE role = 'super_admin'").fetchone()
+        has_super_admin = existing_sa is not None
     except Exception:
-        pass
+        has_super_admin = False
 
-    if _bs_pass and len(_bs_pass) >= 8:
-        try:
-            existing = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
-            if not existing:
-                import hashlib, secrets
-                salt = secrets.token_hex(16)
-                digest = hashlib.pbkdf2_hmac("sha256", _bs_pass.encode(), salt.encode(), 200000).hex()
-                pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
+    if not has_super_admin:
+        # 没有超级管理员，必须创建一个
+        import hashlib, secrets
+        if _bs_pass and len(_bs_pass) >= 8:
+            username = "admin"
+            password = _bs_pass
+            salt = secrets.token_hex(16)
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000).hex()
+            pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
+            try:
                 conn.execute(
                     "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
-                    ("admin", pw_hash, now),
+                    (username, pw_hash, now),
                 )
                 _first_run_admin_info = {
-                    "username": "admin",
-                    "password": _bs_pass,
+                    "username": username,
+                    "password": password,
                     "type": "bootstrap",
                 }
                 _save_first_run_to_env(_first_run_admin_info)
-        except Exception as e:
-            print(f"[MC-Monitor] 创建管理员失败: {e}")
-    elif not has_users:
-        import hashlib, secrets
-        temp_user = "admin"
-        temp_pass = secrets.token_urlsafe(12)
-        salt = secrets.token_hex(16)
-        digest = hashlib.pbkdf2_hmac("sha256", temp_pass.encode(), salt.encode(), 200000).hex()
-        pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
-        try:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
-                (temp_user, pw_hash, now),
-            )
-            _first_run_admin_info = {
-                "username": temp_user,
-                "password": temp_pass,
-                "type": "temporary",
-            }
-            _save_first_run_to_env(_first_run_admin_info)
-        except Exception as e:
-            print(f"[MC-Monitor] 创建临时管理员失败: {e}")
+                print(f"[MC-Monitor] 首次启动：已创建超级管理员用户名: {username}")
+            except Exception as e:
+                print(f"[MC-Monitor] 创建超级管理员失败: {e}")
+        else:
+            username = "admin"
+            password = secrets.token_urlsafe(16)
+            salt = secrets.token_hex(16)
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000).hex()
+            pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
+            try:
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
+                    (username, pw_hash, now),
+                )
+                _first_run_admin_info = {
+                    "username": username,
+                    "password": password,
+                    "type": "temporary",
+                }
+                _save_first_run_to_env(_first_run_admin_info)
+                print(f"[MC-Monitor] 首次启动：已创建随机密码超级管理员")
+                print(f"[MC-Monitor] 用户名: {username} 密码: {password} — 请登录后立即修改")
+            except Exception as e:
+                print(f"[MC-Monitor] 创建超级管理员失败: {e}")
 
     # 将旧 is_admin=1 的用户升级为 admin 角色
     try:

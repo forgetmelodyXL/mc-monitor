@@ -10,7 +10,15 @@
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
-{% set _ = get_flashed_messages(with_categories=true) %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div style="display:none">
+{% for category, message in messages %}
+<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -25,12 +33,12 @@
             <div class="user-dropdown">
                 <button class="user-dropdown-btn user-tag">{{ username }} ▾</button>
                 <div class="user-dropdown-menu" id="userDropdownMenu">
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
                     {% if session.get('is_admin') %}
                         <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
                         <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
                     {% endif %}
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
                     <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
                     <div class="user-dropdown-divider"></div>
                     <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -1387,6 +1395,44 @@
             });
         });
     }
+
+    // ---- 按钮点击反馈：所有表单提交时显示加载状态 ----
+    function showToast(msg, type) {
+        var c = document.getElementById('toastContainer');
+        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'info');
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        c.appendChild(t);
+        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
+    }
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (form.id === 'mkCmdForm') return;  // 跳过麦块命令表单
+        var btn = form.querySelector('button[type="submit"]');
+        if (!btn || btn.classList.contains('btn-saving')) return;
+        btn.classList.add('btn-saving');
+        var origText = btn.textContent;
+        btn.textContent = '处理中...';
+        setTimeout(function () {
+            if (btn.classList.contains('btn-saving')) {
+                btn.classList.remove('btn-saving');
+                btn.textContent = origText;
+            }
+        }, 10000);
+    });
+
+    // 页面加载时显示 flash 消息为 toast
+    (function () {
+        var flashes = document.querySelectorAll('.flash');
+        flashes.forEach(function (f) {
+            var isError = f.classList.contains('flash-error');
+            showToast(f.textContent.trim(), isError ? 'error' : 'success');
+            f.style.display = 'none';
+        });
+    })();
 })();
 </script>
 </body>

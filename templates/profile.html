@@ -3,12 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>个人信息 - MC 服务器监控</title>
+    <title>个人资料 - MC 服务器监控</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <meta name="csrf-token" content="{{ session.get('_csrf_token', '') }}">
+    <style>
+        .profile-layout {
+            display: flex;
+            gap: 24px;
+            min-height: 400px;
+        }
+        .profile-sidebar {
+            width: 200px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .profile-sidebar-btn {
+            display: block;
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #d0d5e0;
+            border-radius: 8px;
+            background: #fff;
+            color: #333;
+            text-align: left;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .profile-sidebar-btn:hover {
+            background: #f0f2f8;
+            border-color: #6c8dff;
+        }
+        .profile-sidebar-btn.active {
+            background: #6c8dff;
+            color: #fff;
+            border-color: #6c8dff;
+            font-weight: 600;
+        }
+        .profile-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .profile-tab {
+            display: none;
+        }
+        .profile-tab.active {
+            display: block;
+        }
+        body.dark-mode .profile-sidebar-btn {
+            background: #2a2d3e;
+            border-color: #3d4260;
+            color: #ccc;
+        }
+        body.dark-mode .profile-sidebar-btn:hover {
+            background: #353a52;
+            border-color: #6c8dff;
+        }
+        body.dark-mode .profile-sidebar-btn.active {
+            background: #6c8dff;
+            color: #fff;
+            border-color: #6c8dff;
+        }
+
+        /* Toast 通知 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            min-width: 280px;
+            max-width: 420px;
+            padding: 14px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            animation: toastIn 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toast.toast-success {
+            background: #38a169;
+        }
+        .toast.toast-error {
+            background: #e53e3e;
+        }
+        .toast.toast-info {
+            background: #3182ce;
+        }
+        .toast-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .toast-msg {
+            flex: 1;
+        }
+        .toast-close {
+            cursor: pointer;
+            opacity: 0.7;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .toast-close:hover {
+            opacity: 1;
+        }
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(40px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toastOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(40px); }
+        }
+
+        /* 按钮加载状态 */
+        .btn-saving {
+            pointer-events: none;
+            opacity: 0.7;
+            position: relative;
+        }
+        .btn-saving::after {
+            content: '';
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-left: 8px;
+            border: 2px solid transparent;
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
+<div class="toast-container" id="toastContainer"></div>
+
 <header class="topbar">
     <div class="topbar-inner">
         <div class="brand">
@@ -22,12 +164,12 @@
             <div class="user-dropdown">
                 <button class="user-dropdown-btn user-tag">{{ username }} ▾</button>
                 <div class="user-dropdown-menu">
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
                     {% if session.get('is_admin') %}
                         <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
                         <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
                     {% endif %}
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
                     <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
                     <div class="user-dropdown-divider"></div>
                     <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -45,103 +187,174 @@
 <main class="container">
     <section class="card">
         <div class="card-header">
-            <h2>👤 个人信息</h2>
+            <h2>👤 个人资料</h2>
             <p class="hint">管理您的账号信息和安全设置</p>
         </div>
 
-        {% if error %}
-        <div class="alert alert-error">{{ error }}</div>
+        {% if profile_error %}
+        <div class="alert alert-error">{{ profile_error }}</div>
+        {% endif %}
+        {% if email_error %}
+        <div class="alert alert-error">{{ email_error }}</div>
         {% endif %}
 
-        <div style="display: grid; gap: 24px;">
-            <div>
-                <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #2a2e5b;">邮件告警通知</h3>
-                <form method="POST" action="{{ url_for('user_profile') }}" class="add-server-form">
-                    {{ csrf_input() }}
-                    <input type="hidden" name="action" value="save_email">
-                    {% if email_error %}
-                    <div class="alert alert-error" style="margin: 0 0 12px 0;">{{ email_error }}</div>
-                    {% endif %}
-                    <div class="form-group">
-                        <label>接收邮箱</label>
-                        <input type="email" name="email" placeholder="your@email.com" value="{{ user.email or '' }}" maxlength="128">
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" name="email_alert_enabled" {% if user.email_alert_enabled %}checked{% endif %}>
-                                &nbsp;开启邮件告警
-                            </label>
-                            <p class="hint" style="margin: 4px 0 0 0;">服务器上下线时自动发送邮件通知</p>
-                        </div>
-                        <div class="form-group">
-                            <label>冷却时间（分钟）</label>
-                            <input type="number" name="email_cooldown" value="{{ user.email_cooldown }}" min="1" max="1440" style="max-width: 120px;">
-                            <p class="hint" style="margin: 4px 0 0 0;">同一服务器在此时间内不重复发信</p>
-                        </div>
-                    </div>
-                    <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 8px;">
-                        <button type="submit" class="btn btn-primary">保存通知设置</button>
-                    </div>
-                </form>
+        <div class="profile-layout">
+            <div class="profile-sidebar">
+                <button class="profile-sidebar-btn active" data-tab="tab-profile">修改个人资料</button>
+                <button class="profile-sidebar-btn" data-tab="tab-email">配置邮箱</button>
             </div>
 
-            <div style="border-top: 1px solid #e6e8f3; padding-top: 24px;">
-                <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #2a2e5b;">修改用户名</h3>
-                <form method="POST" action="{{ url_for('user_profile') }}" class="add-server-form">
-                    {{ csrf_input() }}
-                    <input type="hidden" name="action" value="change_username">
-                    {% if username_error %}
-                    <div class="alert alert-error" style="margin: 0 0 12px 0;">{{ username_error }}</div>
-                    {% endif %}
-                    <div class="form-row">
-                        <div class="form-group" style="flex: 2;">
+            <div class="profile-content">
+                <div class="profile-tab active" id="tab-profile">
+                    <h3 style="margin: 0 0 16px 0; font-size: 15px; color: #2a2e5b;">修改个人资料</h3>
+                    <form class="add-server-form profile-ajax-form" action="{{ url_for('user_profile') }}" data-action="update_profile">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="action" value="update_profile">
+                        <div class="form-group">
                             <label>当前用户名</label>
-                            <input type="text" value="{{ user.username }}" disabled>
+                            <input type="text" name="username" value="{{ user.username }}" required minlength="3" maxlength="32">
                         </div>
-                        <div class="form-group" style="flex: 2;">
-                            <label>新用户名</label>
-                            <input type="text" name="new_username" placeholder="3-32 个字符" required minlength="3" maxlength="32">
+                        <div class="form-group">
+                            <label>当前邮箱</label>
+                            <input type="email" name="email" value="{{ user.email or '' }}" required>
                         </div>
-                        <div class="form-group form-group-action">
-                            <button type="submit" class="btn btn-primary">保存</button>
+                        <div class="form-group">
+                            <label>当前密码 <span style="color: #e53e3e;">*</span></label>
+                            <input type="password" name="current_password" required placeholder="请输入当前密码以确认身份" autocomplete="current-password">
                         </div>
-                    </div>
-                </form>
-            </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>新密码 <span class="hint">（留空则不修改）</span></label>
+                                <input type="password" name="new_password" minlength="8" placeholder="至少 8 个字符" autocomplete="new-password">
+                            </div>
+                            <div class="form-group">
+                                <label>确认新密码</label>
+                                <input type="password" name="confirm_password" minlength="8" placeholder="再次输入新密码" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 8px;">
+                            <button type="submit" class="btn btn-primary btn-save">保存</button>
+                        </div>
+                    </form>
+                </div>
 
-            <div style="border-top: 1px solid #e6e8f3; padding-top: 24px;">
-                <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #2a2e5b;">修改密码</h3>
-                <form method="POST" action="{{ url_for('user_profile') }}" class="add-server-form">
-                    {{ csrf_input() }}
-                    <input type="hidden" name="action" value="change_password">
-                    {% if password_error %}
-                    <div class="alert alert-error" style="margin: 0 0 12px 0;">{{ password_error }}</div>
-                    {% endif %}
-                    <div class="form-group">
-                        <label>当前密码</label>
-                        <input type="password" name="current_password" required autocomplete="current-password">
-                    </div>
-                    <div class="form-row">
+                <div class="profile-tab" id="tab-email">
+                    <h3 style="margin: 0 0 16px 0; font-size: 15px; color: #2a2e5b;">配置告警邮箱</h3>
+                    <form class="add-server-form profile-ajax-form" action="{{ url_for('user_profile') }}" data-action="save_email">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="action" value="save_email">
                         <div class="form-group">
-                            <label>新密码</label>
-                            <input type="password" name="new_password" required minlength="8" autocomplete="new-password">
+                            <label>接收告警的邮箱</label>
+                            <input type="email" value="{{ user.email or '' }}" disabled>
+                            <p class="hint">告警邮件将发送至您的账号邮箱。如需更换邮箱，请在「修改个人资料」中修改。</p>
                         </div>
-                        <div class="form-group">
-                            <label>确认新密码</label>
-                            <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" name="email_alert_enabled" {% if user.email_alert_enabled %}checked{% endif %}>
+                                    &nbsp;开启邮件告警
+                                </label>
+                                <p class="hint" style="margin: 4px 0 0 0;">服务器上下线时自动发送邮件通知</p>
+                            </div>
+                            <div class="form-group">
+                                <label>冷却时间（分钟）</label>
+                                <input type="number" name="email_cooldown" value="{{ user.email_cooldown }}" min="1" max="1440" style="max-width: 120px;">
+                                <p class="hint" style="margin: 4px 0 0 0;">同一服务器在此时间内不重复发信</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 8px;">
-                        <button type="submit" class="btn btn-primary">更新密码</button>
-                    </div>
-                    <p class="hint">密码至少 8 个字符</p>
-                </form>
+                        <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 8px;">
+                            <button type="submit" class="btn btn-primary btn-save">保存通知设置</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </section>
 </main>
 
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+(function () {
+    // === 侧边栏切换 ===
+    var sidebarBtns = document.querySelectorAll('.profile-sidebar-btn');
+    var tabs = document.querySelectorAll('.profile-tab');
+    sidebarBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var targetTab = this.getAttribute('data-tab');
+            sidebarBtns.forEach(function (b) { b.classList.remove('active'); });
+            this.classList.add('active');
+            tabs.forEach(function (t) {
+                t.classList.remove('active');
+                if (t.id === targetTab) {
+                    t.classList.add('active');
+                }
+            });
+        });
+    });
+
+    // === Toast 通知系统 ===
+    function showToast(message, type) {
+        var container = document.getElementById('toastContainer');
+        var toast = document.createElement('div');
+        toast.className = 'toast toast-' + type;
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        toast.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span>'
+            + '<span class="toast-msg">' + message + '</span>'
+            + '<span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        container.appendChild(toast);
+        setTimeout(function () {
+            toast.style.animation = 'toastOut 0.3s ease forwards';
+            setTimeout(function () { if (toast.parentElement) toast.remove(); }, 300);
+        }, 4000);
+    }
+
+    // === AJAX 表单提交 ===
+    var ajaxForms = document.querySelectorAll('.profile-ajax-form');
+    ajaxForms.forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var btn = form.querySelector('.btn-save');
+            var originalText = btn.textContent;
+            btn.textContent = '保存中...';
+            btn.classList.add('btn-saving');
+
+            var formData = new FormData(form);
+            fetch(form.getAttribute('action'), {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                btn.classList.remove('btn-saving');
+                btn.textContent = originalText;
+                if (data.success) {
+                    showToast(data.message || '保存成功', 'success');
+                    // 更新用户名显示
+                    if (formData.get('action') === 'update_profile') {
+                        var newUsername = formData.get('username');
+                        var userTag = document.querySelector('.user-tag');
+                        if (userTag && newUsername) {
+                            userTag.textContent = newUsername + ' ▾';
+                        }
+                        // 清空密码字段
+                        form.querySelector('[name="current_password"]').value = '';
+                        form.querySelector('[name="new_password"]').value = '';
+                        form.querySelector('[name="confirm_password"]').value = '';
+                    }
+                } else {
+                    showToast(data.message || '保存失败', 'error');
+                }
+            })
+            .catch(function () {
+                btn.classList.remove('btn-saving');
+                btn.textContent = originalText;
+                showToast('网络错误，请重试', 'error');
+            });
+        });
+    });
+})();
+</script>
 </body>
 </html>

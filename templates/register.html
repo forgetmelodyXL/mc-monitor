@@ -36,15 +36,19 @@
         {{ csrf_input() }}
         <div class="form-group">
             <label for="username">用户名</label>
-            <input type="text" id="username" name="username" required minlength="3" maxlength="32" autocomplete="username" autofocus>
+            <input type="text" id="username" name="username" required minlength="3" maxlength="32" autocomplete="username" autofocus placeholder="3-32 个字符">
+        </div>
+        <div class="form-group">
+            <label for="email">邮箱</label>
+            <input type="email" id="email" name="email" required autocomplete="email" placeholder="your@email.com">
         </div>
         <div class="form-group">
             <label for="password">密码</label>
-            <input type="password" id="password" name="password" required minlength="6" autocomplete="new-password">
+            <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 个字符">
         </div>
         <div class="form-group">
             <label for="confirm">确认密码</label>
-            <input type="password" id="confirm" name="confirm" required minlength="6" autocomplete="new-password">
+            <input type="password" id="confirm" name="confirm" required minlength="8" autocomplete="new-password" placeholder="再次输入密码">
         </div>
         <button type="submit" class="btn btn-primary btn-block">注册</button>
     </form>
@@ -88,6 +92,34 @@
     });
 
     init();
+})();
+
+// ---- 按钮点击反馈 ----
+(function () {
+    function showToast(msg, type) {
+        var c = document.getElementById('toastContainer');
+        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'info');
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        c.appendChild(t);
+        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
+    }
+
+    document.addEventListener('submit', function (e) {
+        var btn = e.target.querySelector('button[type="submit"]');
+        if (!btn || btn.classList.contains('btn-saving')) return;
+        btn.classList.add('btn-saving');
+        btn.textContent = '注册中...';
+    });
+
+    var flashes = document.querySelectorAll('.flash');
+    flashes.forEach(function (f) {
+        var isError = f.classList.contains('flash-error');
+        showToast(f.textContent.trim(), isError ? 'error' : 'success');
+        f.style.display = 'none';
+    });
 })();
 </script>
 </body>

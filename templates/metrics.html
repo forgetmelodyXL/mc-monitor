@@ -8,7 +8,15 @@
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
-{% set _ = get_flashed_messages(with_categories=true) %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div style="display:none">
+{% for category, message in messages %}
+<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -23,12 +31,12 @@
             <div class="user-dropdown">
                 <button class="user-dropdown-btn user-tag">{{ username }} · 管理员 ▾</button>
                 <div class="user-dropdown-menu">
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
                     {% if session.get('is_admin') %}
                         <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
                         <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
                     {% endif %}
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
                     <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
                     <div class="user-dropdown-divider"></div>
                     <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">

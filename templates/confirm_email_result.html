@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "base.html" import csrf_input with context %}
+{% block title %}邮箱确认 - MC 服务器监控{% endblock %}
+{% block body_class %}page-login{% endblock %}
+{% block bkg_style %}background-image: url('https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=dark%20minecraft%20background%2C%20cave%20scene%2C%20deep%20blue%20and%20dark%20tone%2C%20atmospheric%20lighting&image_size=square_hd');{% endblock %}
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <h1><a href="{{ url_for('index') }}">MC 服务器监控</a></h1>
+            <p class="login-subtitle">邮箱确认</p>
+        </div>
+        {% if success %}
+        <div class="alert alert-success" style="margin-bottom: 16px;">
+            <span class="alert-icon">&#10003;</span>
+            {{ message }}
+        </div>
+        <div style="text-align: center; margin-top: 16px;">
+            <a href="{{ url_for('login') }}" class="btn btn-primary">前往登录</a>
+        </div>
+        {% else %}
+        <div class="alert alert-error" style="margin-bottom: 16px;">
+            <span class="alert-icon">&#10007;</span>
+            {{ message }}
+        </div>
+        <div style="text-align: center; margin-top: 16px;">
+            <a href="{{ url_for('user_profile') }}" class="btn btn-primary">返回个人中心</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

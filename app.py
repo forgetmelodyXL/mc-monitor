@@ -6,7 +6,9 @@ import struct
 import sqlite3
 import secrets
 import hashlib
+import hmac
 import time
+import re
 import logging
 import logging.handlers
 import concurrent.futures
@@ -224,6 +226,7 @@ def _ensure_schema(db):
         "ALTER TABLE users ADD COLUMN email TEXT",
         "ALTER TABLE users ADD COLUMN email_alert_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN email_cooldown INTEGER NOT NULL DEFAULT 30",
+        "ALTER TABLE users ADD COLUMN display_name TEXT",
     ):
         try:
             db.execute(col_sql)
@@ -235,7 +238,7 @@ def _ensure_schema(db):
 # ============================================================
 # 数据库迁移系统
 # ============================================================
-_SCHEMA_VERSION = 6  # 当前代码库对应的 schema 版本
+_SCHEMA_VERSION = 7  # 当前代码库对应的 schema 版本
 
 
 def _get_schema_version(conn):
@@ -350,6 +353,10 @@ def _run_migrations(conn):
             "ALTER TABLE users ADD COLUMN email_alert_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN email_cooldown INTEGER NOT NULL DEFAULT 30",
         ]),
+        # v7: 显示名称和注册邮件通知
+        (7, "add_display_name_and_reg_email", [
+            "ALTER TABLE users ADD COLUMN display_name TEXT",
+        ]),
     ]
 
     for version, desc, statements in migrations:
@@ -453,7 +460,7 @@ def ensure_csrf_token():
 # ============================================================
 # 版本信息 & 模板上下文
 # ============================================================
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.4.0"
 
 
 @app.context_processor
@@ -773,26 +780,45 @@ def _pack_packet(packet_id: int, payload: bytes) -> bytes:
     return _encode_varint(len(payload) + 1) + _encode_varint(packet_id) + payload
 
 
+def _strip_mc_colors(text: str) -> str:
+    """剥离 Minecraft 颜色/格式代码（§ + 字符）。"""
+    import re
+    return re.sub(r'§[0-9a-fA-Fk-oK-OrR]', '', text)
+
+
 def _parse_description(desc) -> str:
-    """Extract plain text from an MC description (str, dict with text/extra)."""
+    """从 MC 描述中提取纯文本，支持 translate 组件（低版本），剥离所有颜色代码。"""
     if desc is None:
         return ""
     if isinstance(desc, str):
-        return desc
+        return _strip_mc_colors(desc)
     if isinstance(desc, dict):
         parts = []
-        txt = desc.get("text")
-        if txt:
-            parts.append(str(txt))
+        translate = desc.get("translate")
+        if translate:
+            with_params = desc.get("with", [])
+            if with_params:
+                for param in with_params:
+                    if isinstance(param, str):
+                        parts.append(_strip_mc_colors(param))
+                    elif isinstance(param, dict):
+                        parts.append(_parse_description(param))
+            else:
+                parts.append(translate)
+        else:
+            txt = desc.get("text")
+            if txt:
+                parts.append(str(txt))
         extra = desc.get("extra")
         if isinstance(extra, list):
             for seg in extra:
-                if isinstance(seg, dict) and seg.get("text"):
-                    parts.append(str(seg["text"]))
+                if isinstance(seg, dict):
+                    parts.append(_parse_description(seg))
                 elif isinstance(seg, str):
-                    parts.append(seg)
-        return "".join(parts)
-    return str(desc)
+                    parts.append(_strip_mc_colors(seg))
+        result = "".join(parts)
+        return _strip_mc_colors(result)
+    return _strip_mc_colors(str(desc))
 
 
 def ping_mc_server(host: str, port: int, timeout: float = 5.0):
@@ -1223,7 +1249,7 @@ def ping_bedrock_server(host: str, port: int, timeout: float = 5.0):
             strings.append(s)
             offset += str_len
 
-        motd = strings[1] if len(strings) > 1 else ""
+        motd = _strip_mc_colors(strings[1]) if len(strings) > 1 else ""
         protocol = strings[2] if len(strings) > 2 else ""
         version = strings[3] if len(strings) > 3 else ""
         players_online_str = strings[4] if len(strings) > 4 else "0"
@@ -1338,12 +1364,19 @@ def index():
         if not session.get("is_admin"):
             return redirect(url_for("maintenance"))
     db = get_db()
+    _ensure_schema(db)
     servers = db.execute(
-        "SELECT s.*, u.username AS owner_name "
+        "SELECT s.*, u.username AS owner_name, u.display_name "
         "FROM servers s JOIN users u ON s.user_id = u.id "
         "WHERE s.is_public = 1 ORDER BY s.id DESC"
     ).fetchall()
-    return render_template("index.html", servers=servers,
+    # 为每个服务器添加脱敏后的公开显示名称
+    server_list = []
+    for s in servers:
+        s_dict = dict(s)
+        s_dict["owner_display"] = row_get(s, "display_name", "") or _mask_email(row_get(s, "owner_name", "") or "")
+        server_list.append(s_dict)
+    return render_template("index.html", servers=server_list,
                            logged_in=("user_id" in session),
                            current_username=session.get("username", ""))
 
@@ -1362,31 +1395,45 @@ def register():
 
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
+        email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
         confirm = request.form.get("confirm") or ""
 
-        if len(username) < 3 or len(username) > 32:
-            flash("用户名长度应在 3-32 个字符之间", "error")
-        elif len(password) < 6:
-            flash("密码至少需要 6 个字符", "error")
+        import re
+        email_re = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
+        if not username or len(username) < 3 or len(username) > 32:
+            flash("用户名长度必须在 3-32 个字符之间", "error")
+        elif not re.match(email_re, email):
+            flash("请输入有效的邮箱地址", "error")
+        elif len(password) < 8:
+            flash("密码至少需要 8 个字符", "error")
         elif password != confirm:
             flash("两次输入的密码不一致", "error")
         else:
             db = get_db()
-            existing = db.execute(
+            existing_user = db.execute(
                 "SELECT id FROM users WHERE username = ?", (username,)
             ).fetchone()
-            if existing:
+            if existing_user:
                 flash("该用户名已被注册", "error")
             else:
-                db.execute(
-                    "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-                    (username, hash_password(password), datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
-                )
-                db.commit()
-                flash("注册成功，请登录", "success")
-                _audit("register", f"new user: {username}", user_id=None, username=username)
-                return redirect(url_for("login"))
+                existing_email = db.execute(
+                    "SELECT id FROM users WHERE email = ?", (email,)
+                ).fetchone()
+                if existing_email:
+                    flash("该邮箱已被注册", "error")
+                else:
+                    db.execute(
+                        "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                        (username, email, hash_password(password), datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+                    )
+                    db.commit()
+                    flash("注册成功，请登录", "success")
+                    _audit("register", f"new user: {username}, email: {email}", user_id=None, username=username)
+                    # 发送注册欢迎邮件
+                    if get_setting("email_enabled", "0") == "1" and get_setting("registration_email_enabled", "0") == "1":
+                        send_email(email, "欢迎注册 MC 服务器监控", "感谢您注册 MC 服务器监控！\n\n您可以添加和管理您的 Minecraft 服务器，并查看实时状态。\n\n-- MC 服务器监控")
+                    return redirect(url_for("login"))
     return render_template("register.html", registration_disabled=False)
 
 
@@ -1400,12 +1447,16 @@ def login():
             return render_template("login.html", username=(request.form.get("username") or ""))
     in_maintenance = get_setting("maintenance_enabled", "0") == "1"
     if request.method == "POST":
-        username = (request.form.get("username") or "").strip()
+        login_id = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
         db = get_db()
         user = db.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
+            "SELECT * FROM users WHERE username = ?", (login_id,)
         ).fetchone()
+        if not user:
+            user = db.execute(
+                "SELECT * FROM users WHERE email = ?", (login_id,)
+            ).fetchone()
         if user and verify_password(password, user["password_hash"]):
             # 维护模式：仅允许管理员登录
             if in_maintenance and not (user["is_admin"] or 0):
@@ -1445,92 +1496,96 @@ def user_profile():
     db = get_db()
     _ensure_schema(db)
     user = db.execute(
-        "SELECT id, username, email, email_alert_enabled, email_cooldown, created_at FROM users WHERE id = ?",
+        "SELECT id, username, email, password_hash, email_alert_enabled, email_cooldown, created_at FROM users WHERE id = ?",
         (session["user_id"],),
     ).fetchone()
     if not user:
         abort(404)
-    error = None
+    profile_error = None
     email_error = None
-    username_error = None
-    password_error = None
     if request.method == "POST":
         action = request.form.get("action")
-        if action == "change_username":
-            new_username = (request.form.get("new_username") or "").strip()
-            if len(new_username) < 3 or len(new_username) > 32:
-                username_error = "用户名长度必须在 3-32 个字符之间"
-            else:
-                existing = db.execute(
-                    "SELECT id FROM users WHERE username = ? AND id != ?",
-                    (new_username, session["user_id"]),
-                ).fetchone()
-                if existing:
-                    username_error = "该用户名已被占用"
-                else:
-                    db.execute(
-                        "UPDATE users SET username = ? WHERE id = ?",
-                        (new_username, session["user_id"]),
-                    )
-                    db.commit()
-                    session["username"] = new_username
-                    flash("用户名已更新，请重新登录", "success")
-                    _audit("profile_change_username", f"new_username={new_username}")
-                    session.clear()
-                    return redirect(url_for("login"))
-        elif action == "change_password":
+        if action == "update_profile":
+            new_username = (request.form.get("username") or "").strip()
+            new_email = (request.form.get("email") or "").strip()
             current_password = request.form.get("current_password") or ""
             new_password = (request.form.get("new_password") or "").strip()
-            confirm_password = request.form.get("confirm_password") or ""
-            if len(new_password) < 8:
-                password_error = "新密码长度至少 8 个字符"
-            elif new_password != confirm_password:
-                password_error = "两次输入的新密码不一致"
+            confirm_password = (request.form.get("confirm_password") or "").strip()
+
+            import re
+            email_re = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
+            if not current_password:
+                profile_error = "请输入当前密码"
+            elif not verify_password(current_password, user["password_hash"]):
+                profile_error = "当前密码错误"
+            elif not new_username or len(new_username) < 3 or len(new_username) > 32:
+                profile_error = "用户名长度必须在 3-32 个字符之间"
+            elif not re.match(email_re, new_email):
+                profile_error = "请输入有效的邮箱地址"
             else:
-                user_full = db.execute(
-                    "SELECT password_hash FROM users WHERE id = ?",
-                    (session["user_id"],),
-                ).fetchone()
-                if not verify_password(current_password, user_full["password_hash"]):
-                    password_error = "当前密码不正确"
-                else:
-                    db.execute(
-                        "UPDATE users SET password_hash = ? WHERE id = ?",
-                        (hash_password(new_password), session["user_id"]),
-                    )
-                    db.commit()
-                    flash("密码已更新，请重新登录", "success")
-                    _audit("profile_change_password", "password changed")
-                    session.clear()
-                    return redirect(url_for("login"))
+                if new_username != user["username"]:
+                    existing = db.execute(
+                        "SELECT id FROM users WHERE username = ? AND id != ?",
+                        (new_username, session["user_id"]),
+                    ).fetchone()
+                    if existing:
+                        profile_error = "该用户名已被占用"
+                if not profile_error and new_email != (user["email"] or ""):
+                    existing = db.execute(
+                        "SELECT id FROM users WHERE email = ? AND id != ?",
+                        (new_email, session["user_id"]),
+                    ).fetchone()
+                    if existing:
+                        profile_error = "该邮箱已被其他账号使用"
+                if not profile_error:
+                    if new_password:
+                        if len(new_password) < 8:
+                            profile_error = "新密码长度至少 8 个字符"
+                        elif new_password != confirm_password:
+                            profile_error = "两次输入的新密码不一致"
+                    if not profile_error:
+                        if new_password:
+                            db.execute(
+                                "UPDATE users SET username = ?, email = ?, password_hash = ? WHERE id = ?",
+                                (new_username, new_email, hash_password(new_password), session["user_id"]),
+                            )
+                        else:
+                            db.execute(
+                                "UPDATE users SET username = ?, email = ? WHERE id = ?",
+                                (new_username, new_email, session["user_id"]),
+                            )
+                        db.commit()
+                        session["username"] = new_username
+                        _audit("profile_update", f"username={new_username}, email={new_email}")
+                        if _is_ajax():
+                            return jsonify(success=True, message="个人资料已更新")
+                        flash("个人资料已更新", "success")
+                        return redirect(url_for("user_profile"))
         elif action == "save_email":
-            email = (request.form.get("email") or "").strip()
             email_enabled = 1 if request.form.get("email_alert_enabled") else 0
             try:
                 cooldown = int(request.form.get("email_cooldown", "30"))
                 cooldown = max(1, min(cooldown, 1440))
             except ValueError:
                 cooldown = 30
-            import re
-            email_re = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
-            if email and not re.match(email_re, email):
-                email_error = "邮箱格式不正确"
-            else:
-                db.execute(
-                    "UPDATE users SET email = ?, email_alert_enabled = ?, email_cooldown = ? WHERE id = ?",
-                    (email or None, email_enabled, cooldown, session["user_id"]),
-                )
-                db.commit()
-                _audit("profile_save_email", f"email={email}, enabled={email_enabled}")
-                flash("邮件通知设置已保存", "success")
-                return redirect(url_for("user_profile"))
+            db.execute(
+                "UPDATE users SET email_alert_enabled = ?, email_cooldown = ? WHERE id = ?",
+                (email_enabled, cooldown, session["user_id"]),
+            )
+            db.commit()
+            _audit("profile_save_email", f"enabled={email_enabled}, cooldown={cooldown}")
+            if _is_ajax():
+                return jsonify(success=True, message="邮件通知设置已保存")
+            flash("邮件通知设置已保存", "success")
+            return redirect(url_for("user_profile"))
+        # AJAX 请求的 POST 错误统一返回 JSON
+        if _is_ajax():
+            return jsonify(success=False, message=profile_error or email_error or "未知错误")
     return render_template(
         "profile.html",
         user=user,
-        error=error,
+        profile_error=profile_error,
         email_error=email_error,
-        username_error=username_error,
-        password_error=password_error,
         username=session.get("username", ""),
     )
 
@@ -1549,6 +1604,7 @@ def logout():
 @admin_required
 def admin_panel():
     db = get_db()
+    _ensure_schema(db)
     users_raw = db.execute(
         "SELECT id, username, is_admin, role, created_at, "
         "(SELECT COUNT(*) FROM servers s WHERE s.user_id = u.id) AS server_count "
@@ -1562,7 +1618,7 @@ def admin_panel():
         )
         users.append(user)
     server_rows = db.execute(
-        "SELECT s.*, u.username AS owner_name "
+        "SELECT s.*, u.username AS owner_name, u.display_name "
         "FROM servers s JOIN users u ON s.user_id = u.id ORDER BY s.id DESC"
     ).fetchall()
     servers = [
@@ -1572,6 +1628,7 @@ def admin_panel():
             "host": r["host"],
             "port": r["port"],
             "owner_name": r["owner_name"],
+            "owner_display": row_get(r, "display_name", "") or _mask_email(r["owner_name"]),
             "created_at": row_get(r, "created_at", ""),
             "is_public": bool(row_get(r, "is_public", 0)),
         }
@@ -1603,6 +1660,7 @@ def admin_panel():
     smtp_pass_set = bool(get_setting("email_smtp_password", ""))
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
+    reg_email_enabled = get_setting("registration_email_enabled", "0") == "1"
     return render_template("admin.html",
                            users=users, servers=servers,
                            total_users=total_users,
@@ -1622,6 +1680,7 @@ def admin_panel():
                            smtp_pass_set=smtp_pass_set,
                            email_from=email_from,
                            subject_prefix=subject_prefix,
+                           registration_email_enabled=reg_email_enabled,
                            current_username=session.get("username", ""))
 
 
@@ -1718,6 +1777,14 @@ def admin_email_settings():
                 set_setting("email_smtp_password", new_pass)
             set_setting("email_from", request.form.get("email_from", "").strip())
             set_setting("email_subject_prefix", request.form.get("subject_prefix", "[MC监控]").strip() or "[MC监控]")
+            # 注册邮件通知开关：仅在邮件功能开启时允许开启
+            if request.form.get("registration_email_enabled"):
+                if get_setting("email_enabled", "0") == "1":
+                    set_setting("registration_email_enabled", "1")
+                else:
+                    flash("请先开启邮件功能，再启用注册邮件通知", "error")
+            else:
+                set_setting("registration_email_enabled", "0")
             _audit("update_email_settings", "updated SMTP config")
             flash("邮件配置已保存", "success")
             return redirect(url_for("admin_email_settings"))
@@ -1746,6 +1813,7 @@ def admin_email_settings():
     smtp_pass_set = bool(get_setting("email_smtp_password", ""))
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
+    reg_email_enabled = get_setting("registration_email_enabled", "0") == "1"
 
     return render_template(
         "admin.html",
@@ -1758,6 +1826,7 @@ def admin_email_settings():
         smtp_pass_set=smtp_pass_set,
         email_from=email_from,
         subject_prefix=subject_prefix,
+        registration_email_enabled=reg_email_enabled,
         current_username=session.get("username", ""),
     )
 
@@ -1766,48 +1835,50 @@ def admin_email_settings():
 @admin_required
 def admin_reset_password(user_id):
     db = get_db()
-    user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT id, username, role, email FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
+
+    target_role = row_get(user, "role", "user")
+    if target_role == "super_admin":
+        flash("不能重置超级管理员的密码", "error")
+        return redirect(url_for("admin_panel"))
 
     admin_user_id = session["user_id"]
     if user_id == admin_user_id:
         flash("不能在管理后台重置自己的密码，请前往个人中心修改", "error")
         return redirect(url_for("admin_panel"))
 
-    admin_user = db.execute("SELECT id, password_hash, role FROM users WHERE id = ?", (admin_user_id,)).fetchone()
+    admin_user = db.execute("SELECT id, role FROM users WHERE id = ?", (admin_user_id,)).fetchone()
     if not admin_user:
         abort(404)
 
-    admin_current_password = request.form.get("admin_password", "").strip()
-    if not admin_current_password:
-        flash("请输入管理员当前密码", "error")
-        return redirect(url_for("admin_panel"))
-
-    if not verify_password(admin_current_password, admin_user["password_hash"]):
-        flash("管理员密码错误", "error")
-        return redirect(url_for("admin_panel"))
-
     actor_role = row_get(admin_user, "role", "user")
-    target_role = row_get(user, "role", "user")
     if not db_module.can_manage_role(actor_role, target_role):
         flash("你不能重置级别不低于你的用户的密码", "error")
         return redirect(url_for("admin_panel"))
 
-    if user["username"] == "admin" and not request.form.get("confirm_admin"):
-        flash("请确认重置admin账号密码", "error")
-        return redirect(url_for("admin_panel"))
+    # 检查邮件功能是否开启，且目标用户有邮箱
+    import secrets, string
+    email_enabled = get_setting("email_enabled", "0") == "1"
+    user_email = row_get(user, "email", "")
 
-    new_password = (request.form.get("new_password") or "").strip()
-    if len(new_password) < 6:
-        flash("新密码长度至少 6 个字符", "error")
-        return redirect(url_for("admin_panel"))
-
-    db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
-               (hash_password(new_password), user_id))
-    db.commit()
-    _audit("admin_reset_password", f"target user: {user['username']}")
-    flash(f"已重置用户 {user['username']} 的密码", "success")
+    if email_enabled and user_email:
+        new_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+        db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                   (hash_password(new_password), user_id))
+        db.commit()
+        send_email(user_email, "密码已重置",
+                   f"您的密码已被管理员重置。\n\n新密码: {new_password}\n\n请登录后尽快修改密码。\n\n-- MC 服务器监控")
+        _audit("admin_reset_password", f"target user: {user['username']}, email sent")
+        flash(f"已重置用户 {user['username']} 的密码，新密码已发送至邮箱", "success")
+    else:
+        new_password = "123456789"
+        db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                   (hash_password(new_password), user_id))
+        db.commit()
+        _audit("admin_reset_password", f"target user: {user['username']}, default password")
+        flash(f"已重置用户 {user['username']} 的密码为 123456789", "success")
     return redirect(url_for("admin_panel"))
 
 
@@ -1819,16 +1890,16 @@ def admin_toggle_admin(user_id):
                       (user_id,)).fetchone()
     if not user:
         abort(404)
-    if user["username"] == "admin":
-        flash("不能修改默认管理员 admin 的身份", "error")
+    target_role = row_get(user, "role", "user")
+    if target_role == "super_admin":
+        flash("不能修改超级管理员的身份", "error")
         return redirect(url_for("admin_panel"))
     actor_role = session.get("role", "user")
-    target_role = row_get(user, "role", "user")
     if not db_module.can_manage_role(actor_role, target_role):
         flash("你不能管理该用户的角色", "error")
         return redirect(url_for("admin_panel"))
     current_role = target_role
-    new_role = "admin" if current_role not in ("admin", "super_admin") else "user"
+    new_role = "admin" if current_role != "admin" else "user"
     if new_role == "admin" and not db_module.can_manage_role(actor_role, new_role):
         flash("你不能将用户升级到超过你自身级别的角色", "error")
         return redirect(url_for("admin_panel"))
@@ -1848,18 +1919,19 @@ def admin_set_role(user_id):
     if new_role not in db_module.ROLES:
         flash("无效的角色", "error")
         return redirect(url_for("admin_panel"))
+    if new_role == "super_admin":
+        flash("超级管理员有且仅有一个，不能将其他用户设为超级管理员", "error")
+        return redirect(url_for("admin_panel"))
     conn = get_db()
     user = conn.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
-    if user["username"] == "admin" and new_role != "super_admin":
-        flash("不能降级默认管理员 admin", "error")
+    target_role = row_get(user, "role", "user")
+    if target_role == "super_admin":
+        flash("不能修改超级管理员的角色", "error")
         return redirect(url_for("admin_panel"))
     actor_role = session.get("role", "user")
-    if new_role == "super_admin" and actor_role != "super_admin":
-        flash("只有超级管理员才能设置超级管理员角色", "error")
-        return redirect(url_for("admin_panel"))
-    if not db_module.can_manage_role(actor_role, row_get(user, "role", "user")):
+    if not db_module.can_manage_role(actor_role, target_role):
         flash("你不能管理该用户的角色", "error")
         return redirect(url_for("admin_panel"))
     is_admin = 1 if new_role in ("admin", "super_admin") else 0
@@ -1877,14 +1949,14 @@ def admin_delete_user(user_id):
     user = db.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
     if not user:
         abort(404)
-    if user["username"] == "admin":
-        flash("不能删除默认管理员 admin", "error")
+    target_role = row_get(user, "role", "user")
+    if target_role == "super_admin":
+        flash("不能删除超级管理员", "error")
         return redirect(url_for("admin_panel"))
     if int(user_id) == int(session.get("user_id", 0)):
         flash("不能删除自己的账号", "error")
         return redirect(url_for("admin_panel"))
     actor_role = session.get("role", "user")
-    target_role = row_get(user, "role", "user")
     if not db_module.can_manage_role(actor_role, target_role):
         flash("你不能删除级别不低于你的用户", "error")
         return redirect(url_for("admin_panel"))
@@ -2397,6 +2469,80 @@ def server_set_group(server_id):
     return redirect(url_for("dashboard"))
 
 
+def _mask_email(email: str) -> str:
+    """脱敏邮箱：abc@example.com -> abc***@example.com"""
+    if not email or "@" not in email:
+        return email
+    parts = email.split("@")
+    local = parts[0]
+    if len(local) > 3:
+        local = local[:3] + "***"
+    else:
+        local = local + "***"
+    return local + "@" + parts[1]
+
+
+def _generate_email_change_token(user_id, new_email):
+    """生成邮箱更换确认 Token（HMAC 签名，24 小时有效）。"""
+    payload = f"{user_id}|{new_email}|{int(time.time())}"
+    signature = hmac.new(
+        app.secret_key.encode("utf-8") if isinstance(app.secret_key, str) else app.secret_key,
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    token = payload + "|" + signature
+    import base64
+    return base64.urlsafe_b64encode(token.encode("utf-8")).decode("utf-8")
+
+
+def _verify_email_change_token(token):
+    """验证邮箱更换 Token，返回 (user_id, new_email) 或 (None, None)。"""
+    try:
+        import base64
+        decoded = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
+        parts = decoded.rsplit("|", 1)
+        if len(parts) != 2:
+            return None, None
+        payload, provided_sig = parts
+        expected_sig = hmac.new(
+            app.secret_key.encode("utf-8") if isinstance(app.secret_key, str) else app.secret_key,
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(provided_sig, expected_sig):
+            return None, None
+        payload_parts = payload.split("|")
+        if len(payload_parts) != 3:
+            return None, None
+        user_id = int(payload_parts[0])
+        new_email = payload_parts[1]
+        timestamp = int(payload_parts[2])
+        # 24 小时有效期
+        if time.time() - timestamp > 86400:
+            return None, None
+        return user_id, new_email
+    except Exception:
+        return None, None
+
+
+@app.route("/confirm-email/<token>")
+def confirm_email_change(token):
+    """确认邮箱更换链接。"""
+    user_id, new_email = _verify_email_change_token(token)
+    if not user_id:
+        return render_template("confirm_email_result.html", success=False, message="确认链接无效或已过期，请重新发起更换。"), 400
+    db = get_db()
+    _ensure_schema(db)
+    # 检查新邮箱是否已被使用
+    existing = db.execute("SELECT id FROM users WHERE username = ? AND id != ?", (new_email, user_id)).fetchone()
+    if existing:
+        return render_template("confirm_email_result.html", success=False, message="该邮箱已被其他账号使用。"), 400
+    db.execute("UPDATE users SET username = ? WHERE id = ?", (new_email, user_id))
+    db.commit()
+    _audit("email_change_confirmed", f"user {user_id} changed email to {new_email}", user_id=user_id)
+    return render_template("confirm_email_result.html", success=True, message=f"邮箱已成功更换为 {new_email}。"), 200
+
+
 @app.route("/api/public_status")
 def api_public_status():
     # 速率限制（每个 IP 每分钟 30 次）
@@ -2408,8 +2554,9 @@ def api_public_status():
         }), 429
     """只读公开接口：返回所有 is_public = 1 的服务器状态"""
     db = get_db()
+    _ensure_schema(db)
     servers = db.execute(
-        "SELECT s.*, u.username AS owner_name "
+        "SELECT s.*, u.username AS owner_name, u.display_name "
         "FROM servers s JOIN users u ON s.user_id = u.id "
         "WHERE s.is_public = 1 ORDER BY s.id DESC"
     ).fetchall()
@@ -2436,7 +2583,7 @@ def api_public_status():
             "motd": info.get("motd") or "",
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
-            "owner_name": row_get(s, "owner_name", "") or "",
+            "owner_display": row_get(s, "display_name", "") or _mask_email(row_get(s, "owner_name", "") or ""),
             "checked_at": datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
@@ -2934,6 +3081,12 @@ _RATE_LIMIT_CONFIG = {
     "server_add":    {"per_minute": 5,  "max_burst": 5},    # 添加服务器：每分钟 5 次
     "minekuai":      {"per_minute": 30, "max_burst": 30},   # 麦块联机 API：每分钟 30 次
 }
+
+
+def _is_ajax():
+    """判断当前请求是否为 AJAX 请求"""
+    return (request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            or request.accept_mimetypes.best == "application/json")
 
 
 def _get_client_ip():

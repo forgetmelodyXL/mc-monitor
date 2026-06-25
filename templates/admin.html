@@ -8,7 +8,15 @@
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
-{% set _ = get_flashed_messages(with_categories=true) %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div style="display:none">
+{% for category, message in messages %}
+<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
 
 <header class="topbar">
     <div class="topbar-inner">
@@ -23,12 +31,12 @@
             <div class="user-dropdown">
                 <button class="user-dropdown-btn user-tag">{{ current_username }} · 管理员 ▾</button>
                 <div class="user-dropdown-menu">
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
                     {% if session.get('is_admin') %}
                         <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
                         <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
                     {% endif %}
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 修改个人信息</a>
                     <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
                     <div class="user-dropdown-divider"></div>
                     <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -177,6 +185,19 @@
                 </div>
             </div>
 
+            <div class="setting-card" style="margin-top: 12px;">
+                <div class="setting-row">
+                    <div>
+                        <h3 class="setting-title">注册邮件通知</h3>
+                        <p class="setting-desc">{% if not email_enabled %}请先开启邮件功能{% elif registration_email_enabled %}已开启 - 新用户注册后收到欢迎邮件{% else %}已关闭 - 新用户注册后不发送邮件{% endif %}</p>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" name="registration_email_enabled" {% if registration_email_enabled %}checked{% endif %} {% if not email_enabled %}disabled{% endif %}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
                 <div class="form-group">
                     <label>SMTP 服务器</label>
@@ -253,14 +274,6 @@
     <section class="card">
         <h2>👥 用户列表（共 {{ total_users }} 个）</h2>
         <div class="admin-table-wrap" style="margin-top: 8px;">
-            <div style="padding: 8px 12px; background: #fff6cc; border: 1px solid #e9cf73; border-radius: 8px; margin-bottom: 12px; font-size: 13px;">
-                <strong>🔐 敏感操作保护：</strong>为了安全，重置任意用户密码前，必须先在下面输入您的当前管理员密码进行验证（一次会话内只需填一次）。
-                <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
-                    <input type="password" id="globalAdminPassword" placeholder="您的当前管理员密码" style="flex: 1; max-width: 320px;">
-                    <button type="button" class="btn btn-sm btn-outline" id="applyAdminPwdBtn">填入所有重置表单</button>
-                    <span id="adminPwdStatus" style="color:#666; font-size: 12px;"></span>
-                </div>
-            </div>
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -295,29 +308,25 @@
                         <td>{{ u.created_at }}</td>
                         <td>
                             <!-- 重置密码 -->
-                            <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form reset-password-form">
+                            {% if u.role != 'super_admin' %}
+                            <form method="POST" action="{{ url_for('admin_reset_password', user_id=u.id) }}" class="inline-form reset-password-form" onsubmit="return confirm('确定重置用户 {{ u.username }} 的密码？');">
                                 {{ csrf_input() }}
-                                <input type="hidden" name="admin_password" value="">
-                                <input type="text" name="new_password" placeholder="新密码" size="14" required>
-                                {% if u.username == 'admin' %}
-                                    <input type="hidden" name="confirm_admin" value="1">
-                                {% endif %}
                                 <button type="submit" class="btn btn-sm">重置密码</button>
                             </form>
+                            {% endif %}
 
-                            <!-- 角色管理 (不能操作默认 admin 的角色) -->
-                            {% if u.username != 'admin' and session.get('role') == 'super_admin' %}
+                            <!-- 角色管理（不能操作超级管理员） -->
+                            {% if u.role != 'super_admin' and session.get('role') == 'super_admin' %}
                             <form method="POST" action="{{ url_for('admin_set_role', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
                                 {{ csrf_input() }}
                                 <select name="role" style="padding: 4px;">
                                     <option value="user" {% if u.role == 'user' %}selected{% endif %}>普通用户</option>
                                     <option value="moderator" {% if u.role == 'moderator' %}selected{% endif %}>协管员</option>
                                     <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>管理员</option>
-                                    <option value="super_admin" {% if u.role == 'super_admin' %}selected{% endif %}>超级管理员</option>
                                 </select>
                                 <button type="submit" class="btn btn-sm">设置角色</button>
                             </form>
-                            {% elif u.username != 'admin' %}
+                            {% elif u.role != 'super_admin' %}
                             <form method="POST" action="{{ url_for('admin_toggle_admin', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
                                 {{ csrf_input() }}
                                 <button type="submit" class="btn btn-sm">
@@ -326,8 +335,8 @@
                             </form>
                             {% endif %}
 
-                            <!-- 删除用户 (不能删除 admin 和自己) -->
-                            {% if u.username != 'admin' %}
+                            <!-- 删除用户（不能删除超级管理员和自己） -->
+                            {% if u.role != 'super_admin' %}
                             <form method="POST" action="{{ url_for('admin_delete_user', user_id=u.id) }}"
                                   class="inline-form" style="margin-top: 4px;"
                                   onsubmit="return confirm('确定删除用户 {{ u.username }}？将连同其 {{ u.server_count }} 台服务器一起删除');">
@@ -439,29 +448,35 @@
         localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
     });
 
-    // 敏感操作：管理员密码填充支持
-    var globalAdminPwd = document.getElementById('globalAdminPassword');
-    var applyPwdBtn = document.getElementById('applyAdminPwdBtn');
-    var pwdStatus = document.getElementById('adminPwdStatus');
-    if (globalAdminPwd && applyPwdBtn) {
-        function applyAdminPassword() {
-            var val = globalAdminPwd.value;
-            if (!val) {
-                if (pwdStatus) { pwdStatus.textContent = '请先输入您的管理员密码'; pwdStatus.style.color = '#c00'; }
-                return;
-            }
-            var filled = 0;
-            document.querySelectorAll('.reset-password-form input[name="admin_password"]').forEach(function (inp) {
-                inp.value = val;
-                filled += 1;
-            });
-            if (pwdStatus) { pwdStatus.textContent = '已填充 ' + filled + ' 个重置表单，请点击「重置密码」按钮'; pwdStatus.style.color = '#2a8'; }
-        }
-        applyPwdBtn.addEventListener('click', applyAdminPassword);
-        globalAdminPwd.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); applyAdminPassword(); } });
+    init();
+})();
+
+// ---- 按钮点击反馈 ----
+(function () {
+    function showToast(msg, type) {
+        var c = document.getElementById('toastContainer');
+        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'info');
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        c.appendChild(t);
+        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
     }
 
-    init();
+    document.addEventListener('submit', function (e) {
+        var btn = e.target.querySelector('button[type="submit"]');
+        if (!btn || btn.classList.contains('btn-saving')) return;
+        btn.classList.add('btn-saving');
+        if (btn.textContent.length < 10) btn.textContent = '处理中...';
+    });
+
+    var flashes = document.querySelectorAll('.flash');
+    flashes.forEach(function (f) {
+        var isError = f.classList.contains('flash-error');
+        showToast(f.textContent.trim(), isError ? 'error' : 'success');
+        f.style.display = 'none';
+    });
 })();
 </script>
 </body>
