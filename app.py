@@ -97,9 +97,9 @@ _secret_key = _secret_key or secrets.token_hex(32)
 
 app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION
 app.config["PREFERRED_URL_SCHEME"] = "https" if IS_PRODUCTION else "http"
 
 
@@ -221,11 +221,15 @@ def _ensure_schema(db):
         "ALTER TABLE servers ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN minekuai_api_key TEXT",
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE users ADD COLUMN email_alert_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN email_cooldown INTEGER NOT NULL DEFAULT 30",
     ):
         try:
             db.execute(col_sql)
         except sqlite3.OperationalError:
             pass
+    _run_migrations(db)
 
 
 # ============================================================
@@ -449,7 +453,7 @@ def ensure_csrf_token():
 # ============================================================
 # 版本信息 & 模板上下文
 # ============================================================
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.2"
 
 
 @app.context_processor

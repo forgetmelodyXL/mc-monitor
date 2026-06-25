@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.2] - 2026-06-25
+
+### 🔧 修复
+- 修复打包 EXE 进入修改个人资料页面报 500 错误（`session.is_admin` 属性访问改为字典访问）
+- 修复旧数据库缺失 `email` / `email_alert_enabled` / `email_cooldown` 列导致 `OperationalError`
+- 修复 `_run_migrations` 数据库迁移系统从未被调用，导致后续 schema 变更不生效
+
+## [1.3.1] - 2026-06-25
+
+### 🔧 修复
+- 修复生产环境 HTTP 访问时 Session Cookie 丢失，导致登录始终 403（`SESSION_COOKIE_SECURE = False`）
+
 ## [1.3.0] - 2026-06-25
 
 ### ✨ 新增
@@ -132,7 +144,9 @@
 - 公共主页 + 我的管理
 - 简单管理后台
 
-[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/forgetmelodyXL/mc-monitor/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.3.2
+[1.3.1]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.3.1
 [1.3.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.3.0
 [1.2.0]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.2.0
 [1.1.3]: https://github.com/forgetmelodyXL/mc-monitor/releases/tag/v1.1.3
