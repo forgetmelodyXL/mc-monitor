@@ -1623,7 +1623,24 @@ async function submitSortOrder() {
         var type = sessionStorage.getItem('_flash_type') || 'success';
         sessionStorage.removeItem('_flash_msg');
         sessionStorage.removeItem('_flash_type');
-        showToast(msg, type);
+        var icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+        var container = document.querySelector('.flash-banner-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'flash-banner-container';
+            document.body.appendChild(container);
+        }
+        var banner = document.createElement('div');
+        banner.className = 'flash-banner flash-banner-' + type;
+        banner.innerHTML = '<span class="flash-banner-icon">' + (icons[type] || '') + '</span>' +
+            '<span class="flash-banner-text">' + msg + '</span>' +
+            '<button type="button" class="flash-banner-close" onclick="var b=this.parentElement;b.classList.add(\'hide\');setTimeout(function(){b.remove()},300)">✕</button>';
+        container.appendChild(banner);
+        banner.addEventListener('animationend', function (e) {
+            if (e.animationName === 'bannerAuto' || e.animationName === 'bannerOut') {
+                if (banner.parentElement) banner.remove();
+            }
+        });
     }
 })();
 </script>
