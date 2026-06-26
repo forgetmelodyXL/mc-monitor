@@ -18,6 +18,7 @@ from functools import wraps
 # Beijing timezone (UTC+8)
 BEIJING_TZ = timezone(timedelta(hours=8))
 
+
 def now_beijing():
     """Return current datetime in Beijing timezone."""
     return datetime.now(BEIJING_TZ)
@@ -69,7 +70,7 @@ def _name_display_width(name):
     return chinese * 2 + (len(name) - chinese)
 
 
-import db as db_module
+import db as db_module  # noqa: E402
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
 if _this_dir not in sys.path:
@@ -661,7 +662,7 @@ def _set_email_cooldown(user_id: int, server_id: int) -> None:
 
 
 def send_alert_email(user_id: int, server_id: int, server_name: str,
-                    event_type: str, message: str) -> bool:
+                     event_type: str, message: str) -> bool:
     """发送告警邮件（带冷却检查）"""
     db = get_db()
     user_row = db.execute(
@@ -914,8 +915,8 @@ def ping_mc_server(host: str, port: int, timeout: float = 5.0):
 
         # ---- Phase 3: Read response ----
         try:
-            _length = _read_varint(sock)
-            _packet_id = _read_varint(sock)
+            _read_varint(sock)  # length (unused)
+            _read_varint(sock)  # packet_id (unused)
             json_length = _read_varint(sock)
         except socket.timeout as e:
             raise ConnectionError(
@@ -1353,7 +1354,7 @@ def ping_http_server(url: str, timeout: float = 5.0):
     try:
         t0 = time.perf_counter()
         resp = _requests_mod.get(url, timeout=timeout, allow_redirects=True,
-                                  headers={"User-Agent": "MC-Monitor/1.0"})
+                                 headers={"User-Agent": "MC-Monitor/1.0"})
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         online = 200 <= resp.status_code < 400
         return {
@@ -1476,15 +1477,29 @@ def register():
                     flash("该邮箱已被注册", "error")
                 else:
                     db.execute(
-                        "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                        (username, email, hash_password(password), now_beijing().isoformat(sep=" ", timespec="seconds")),
+                        "INSERT INTO users (username, email, password_hash, created_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (
+                            username,
+                            email,
+                            hash_password(password),
+                            now_beijing().isoformat(sep=" ", timespec="seconds"),
+                        ),
                     )
                     db.commit()
                     flash("注册成功，请登录", "success")
-                    _audit("register", f"new user: {username}, email: {email}", user_id=None, username=username)
+                    _audit("register", f"new user: {username}, email: {email}",
+                           user_id=None, username=username)
                     # 发送注册欢迎邮件
-                    if get_setting("email_enabled", "0") == "1" and get_setting("registration_email_enabled", "0") == "1":
-                        send_email(email, "欢迎注册 MC 服务器监控", "感谢您注册 MC 服务器监控！\n\n您可以添加和管理您的 Minecraft 服务器，并查看实时状态。\n\n-- MC 服务器监控")
+                    if (get_setting("email_enabled", "0") == "1"
+                            and get_setting("registration_email_enabled", "0") == "1"):
+                        send_email(
+                            email,
+                            "欢迎注册 MC 服务器监控",
+                            "感谢您注册 MC 服务器监控！\n\n"
+                            "您可以添加和管理您的 Minecraft 服务器，并查看实时状态。\n\n"
+                            "-- MC 服务器监控",
+                        )
                     return redirect(url_for("login"))
     return render_template("register.html", registration_disabled=False)
 
@@ -1548,7 +1563,9 @@ def user_profile():
     db = get_db()
     _ensure_schema(db)
     user = db.execute(
-        "SELECT id, username, email, password_hash, email_alert_enabled, email_cooldown, created_at FROM users WHERE id = ?",
+        "SELECT id, username, email, password_hash, "
+        "email_alert_enabled, email_cooldown, created_at "
+        "FROM users WHERE id = ?",
         (session["user_id"],),
     ).fetchone()
     if not user:
@@ -1710,7 +1727,6 @@ def admin_panel():
     smtp_port = get_setting("email_smtp_port", "465")
     smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
     smtp_user = get_setting("email_smtp_user", "")
-    smtp_pass_set = bool(get_setting("email_smtp_password", ""))
     smtp_password = get_setting("email_smtp_password", "")
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
@@ -1864,7 +1880,6 @@ def admin_email_settings():
     smtp_port = get_setting("email_smtp_port", "465")
     smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
     smtp_user = get_setting("email_smtp_user", "")
-    smtp_pass_set = bool(get_setting("email_smtp_password", ""))
     smtp_password = get_setting("email_smtp_password", "")
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
@@ -2001,7 +2016,8 @@ def admin_reset_password(user_id):
         return redirect(url_for("admin_panel"))
 
     # 检查邮件功能是否开启，且目标用户有邮箱
-    import secrets, string
+    import secrets
+    import string
     email_enabled = get_setting("email_enabled", "0") == "1"
     user_email = row_get(user, "email", "")
 
@@ -2296,7 +2312,10 @@ def server_add():
 
     try:
         db.execute(
-            "INSERT INTO servers (user_id, group_id, name, host, port, protocol, is_public, show_players, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO servers "
+            "(user_id, group_id, name, host, port, protocol, "
+            "is_public, show_players, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
             (
                 session["user_id"],
                 group_id,
@@ -2792,7 +2811,10 @@ def api_public_status():
             total_players += (entry["players_online"] or 0)
         try:
             db.execute(
-                "INSERT INTO status_logs (server_id, online, players_online, players_max, version, motd, latency_ms, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO status_logs "
+                "(server_id, online, players_online, players_max, "
+                "version, motd, latency_ms, checked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     s["id"],
                     1 if online else 0,
@@ -2870,7 +2892,10 @@ def api_status():
         results.append(entry)
         try:
             db.execute(
-                "INSERT INTO status_logs (server_id, online, players_online, players_max, version, motd, latency_ms, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO status_logs "
+                "(server_id, online, players_online, players_max, "
+                "version, motd, latency_ms, checked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     s["id"],
                     1 if online else 0,
@@ -2942,7 +2967,7 @@ def _get_requests():
     if _requests_module is not None:
         return _requests_module
     try:
-        import requests  # noqa: F401
+        import requests  # noqa: F811
         _requests_module = requests
         return _requests_module
     except ImportError:
@@ -3118,9 +3143,8 @@ def api_minekuai_list_servers():
     return jsonify(body), status
 
 
-import re
-
 _INSTANCE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
 
 def _validate_instance_id(instance_id: str) -> bool:
     """校验 instance_id 是否合法，只允许字母、数字、下划线和连字符。"""
@@ -3369,11 +3393,12 @@ def rate_limit(bucket_name, include_user=False):
 def _check_apscheduler():
     """确保 APScheduler 已安装"""
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.schedulers.background import BackgroundScheduler  # noqa: F401
         return True
     except ImportError:
         print("⚠  缺少 APScheduler 模块，正在安装…")
-        import subprocess, sys
+        import subprocess
+        import sys
         subprocess.check_call([sys.executable, "-m", "pip", "install", "APScheduler", "-q"])
         print("✅ APScheduler 安装完成。")
         return True
@@ -3385,7 +3410,7 @@ def _poll_all_servers():
     每次采集会对所有服务器并发执行 ping，检测掉线/恢复时生成告警。
     """
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.schedulers.background import BackgroundScheduler  # noqa: F401
     except ImportError:
         return
 
@@ -3499,9 +3524,13 @@ def _poll_all_servers():
                    VALUES (?, ?, ?, ?, ?)""",
                 alert,
             )
-            if send_alert_email(user_id, server_id,
-                              next((r["name"] for r in results if r["server_id"] == server_id), ""),
-                              event_type, msg):
+            if send_alert_email(
+                user_id,
+                server_id,
+                next((r["name"] for r in results if r["server_id"] == server_id), ""),
+                event_type,
+                msg,
+            ):
                 email_count += 1
         if alerts_to_insert:
             logging.info(f"[Scheduler] 生成 {len(alerts_to_insert)} 条告警，发送 {email_count} 封邮件")
@@ -3522,7 +3551,7 @@ def _cleanup_old_data():
     - alerts:     超过 alerts_retention_days 天的已读记录（默认 7 天），未读最多保留 30 天
     """
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.schedulers.background import BackgroundScheduler  # noqa: F401
     except ImportError:
         return
 
@@ -3798,7 +3827,8 @@ if __name__ == "__main__":
         import requests  # noqa: F401
     except ImportError:
         print("⚠  缺少 requests 模块，正在安装…")
-        import subprocess, sys
+        import subprocess
+        import sys
         subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
         print("✅ requests 安装完成，重新启动后即可使用麦块联机 API。")
         sys.exit(0)

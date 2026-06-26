@@ -62,14 +62,16 @@ def cmd_reset_password(args):
         if not existing:
             pw_hash = hash_password(new_pass)
             db.execute(
-                "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
+                "INSERT INTO users "
+                "(username, password_hash, role, is_admin, created_at) "
+                "VALUES (?, ?, 'super_admin', 1, ?)",
                 ("admin", pw_hash, now),
             )
             db.commit()
             print("=" * 50)
             print("  admin 用户不存在，已创建新账号")
             print("=" * 50)
-            print(f"  用户名: admin")
+            print("  用户名: admin")
             print(f"  密  码: {new_pass}")
             print("=" * 50)
         else:
@@ -82,7 +84,7 @@ def cmd_reset_password(args):
             print("=" * 50)
             print("  admin 密码重置成功")
             print("=" * 50)
-            print(f"  用户名: admin")
+            print("  用户名: admin")
             print(f"  密  码: {new_pass}")
             print("=" * 50)
         return 0
@@ -129,7 +131,7 @@ def cmd_create_user(args):
         print("=" * 50)
         print(f"  用户名: {username}")
         print(f"  密  码: {password}")
-        print(f"  角  色: user")
+        print("  角  色: user")
         print("=" * 50)
         return 0
     except Exception as e:

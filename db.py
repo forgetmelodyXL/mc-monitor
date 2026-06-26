@@ -18,11 +18,12 @@
 import os
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # 类型检测
 # ---------------------------------------------------------------------------
+
 
 def _parse_db_url(url=None):
     url = url or os.environ.get("MCMONITOR_DB_URL", "")
@@ -179,7 +180,7 @@ class DBWrapper:
             sql = sql.replace("?", "%s")
             sql = sql.replace("datetime('now')", "NOW()")
             sql = sql.replace("ON CONFLICT(key) DO UPDATE SET",
-                             "ON CONFLICT(key) DO UPDATE SET")
+                              "ON CONFLICT(key) DO UPDATE SET")
             return sql
         if self._backend == "mysql":
             sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INT AUTO_INCREMENT PRIMARY KEY")
@@ -368,7 +369,8 @@ def init_db(db_path=None):
 
     if not has_super_admin:
         # 没有超级管理员，必须创建一个
-        import hashlib, secrets
+        import hashlib
+        import secrets
         if _bs_pass and len(_bs_pass) >= 8:
             username = "admin"
             password = _bs_pass
@@ -377,7 +379,9 @@ def init_db(db_path=None):
             pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
             try:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
+                    "INSERT INTO users "
+                    "(username, password_hash, role, is_admin, created_at) "
+                    "VALUES (?, ?, 'super_admin', 1, ?)",
                     (username, pw_hash, now),
                 )
                 _first_run_admin_info = {
@@ -397,7 +401,9 @@ def init_db(db_path=None):
             pw_hash = f"pbkdf2:sha256:200000${salt}${digest}"
             try:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'super_admin', 1, ?)",
+                    "INSERT INTO users "
+                    "(username, password_hash, role, is_admin, created_at) "
+                    "VALUES (?, ?, 'super_admin', 1, ?)",
                     (username, pw_hash, now),
                 )
                 _first_run_admin_info = {

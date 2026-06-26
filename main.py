@@ -37,7 +37,7 @@ for _p in _candidate_site_pkgs:
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 
-import app as app_module
+import app as app_module  # noqa: E402
 
 
 def main():
@@ -45,7 +45,8 @@ def main():
         import requests  # noqa: F401
     except ImportError:
         print("⚠  缺少 requests 模块，正在安装…")
-        import subprocess, sys
+        import subprocess
+        import sys
         subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
         print("✅ requests 安装完成，重新启动后即可使用麦块联机 API。")
 
