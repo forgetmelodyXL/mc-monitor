@@ -2086,17 +2086,11 @@ def server_add():
         if port < 1 or port > 65535:
             raise ValueError()
     except ValueError:
-        message = "端口必须是 1-65535 的整数"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("端口必须是 1-65535 的整数", "error")
         return redirect(url_for("dashboard"))
 
     if not name or not host:
-        message = "请填写完整的服务器名称和地址"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("请填写完整的服务器名称和地址", "error")
         return redirect(url_for("dashboard"))
 
     db = get_db()
@@ -2143,10 +2137,7 @@ def server_add():
         )
     db.commit()
     _audit("server_add", f"added server: {name}")
-    message = f"已添加服务器：{name}"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash(f"已添加服务器：{name}", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2163,10 +2154,7 @@ def server_delete(server_id):
     db.execute("DELETE FROM servers WHERE id = ?", (server_id,))
     db.commit()
     _audit("server_delete", f"deleted server: {server['name']}")
-    message = "服务器已删除"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash("服务器已删除", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2192,16 +2180,10 @@ def server_edit(server_id):
         if port < 1 or port > 65535:
             raise ValueError()
     except ValueError:
-        message = "端口必须是 1-65535 的整数"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("端口必须是 1-65535 的整数", "error")
         return redirect(url_for("dashboard"))
     if not name or not host:
-        message = "请填写完整的服务器名称和地址"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("请填写完整的服务器名称和地址", "error")
         return redirect(url_for("dashboard"))
     try:
         db.execute(
@@ -2215,10 +2197,7 @@ def server_edit(server_id):
         )
     db.commit()
     _audit("server_edit", f"edited server: {server['name']} -> {name}")
-    message = f"服务器 {name} 已更新"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash(f"服务器 {name} 已更新", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2269,9 +2248,9 @@ def server_toggle_public(server_id):
         pass
     db.commit()
     label = "公开" if new_val == 1 else "私有"
-    flash(f"服务器已设为{label}", "success")
     if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
         return jsonify({"ok": True, "is_public": bool(new_val), "id": server_id})
+    flash(f"服务器已设为{label}", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2296,9 +2275,9 @@ def server_toggle_show_players(server_id):
         pass
     db.commit()
     label = "显示玩家名" if new_val == 1 else "隐藏玩家名"
-    flash(f"已{label}", "success")
     if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
         return jsonify({"ok": True, "show_players": bool(new_val), "id": server_id})
+    flash(f"已{label}", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2339,19 +2318,14 @@ def group_add():
     """创建新分组"""
     name = (request.form.get("name") or "").strip()
     if not name:
-        message = "分组名称不能为空"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("分组名称不能为空", "error")
         return redirect(url_for("dashboard"))
     if len(name) > 32:
-        message = "分组名称不能超过 32 个字符"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("分组名称不能超过 32 个字符", "error")
         return redirect(url_for("dashboard"))
     db = get_db()
     _ensure_schema(db)
+    # 取最大 sort_order —— 如果旧数据库没有 server_groups 表，先创建
     max_order_row = db.execute(
         "SELECT MAX(sort_order) FROM server_groups WHERE user_id = ?",
         (session["user_id"],)
@@ -2364,10 +2338,7 @@ def group_add():
     )
     db.commit()
     _audit("group_add", f"created group: {name}")
-    message = f"已创建分组：{name}"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash(f"已创建分组：{name}", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2377,16 +2348,10 @@ def group_rename(group_id):
     """重命名分组"""
     name = (request.form.get("name") or "").strip()
     if not name:
-        message = "分组名称不能为空"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("分组名称不能为空", "error")
         return redirect(url_for("dashboard"))
     if len(name) > 32:
-        message = "分组名称不能超过 32 个字符"
-        flash(message, "error")
-        if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-            return jsonify({"ok": False, "message": message}), 400
+        flash("分组名称不能超过 32 个字符", "error")
         return redirect(url_for("dashboard"))
     db = get_db()
     _ensure_schema(db)
@@ -2402,10 +2367,7 @@ def group_rename(group_id):
     )
     db.commit()
     _audit("group_rename", f"renamed group to: {name}")
-    message = f"分组已重命名为：{name}"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash(f"分组已重命名为：{name}", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2431,10 +2393,7 @@ def group_delete(group_id):
     db.execute("DELETE FROM server_groups WHERE id = ?", (group_id,))
     db.commit()
     _audit("group_delete", f"deleted group: {grp['name']}")
-    message = f"分组 {grp['name']} 已删除（服务器已移至未分组）"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash(f"分组 {grp['name']} 已删除（服务器已移至未分组）", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2497,10 +2456,7 @@ def server_set_group(server_id):
     except sqlite3.OperationalError:
         pass
     db.commit()
-    message = "服务器分组已更新"
-    flash(message, "success")
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "message": message})
+    flash("服务器分组已更新", "success")
     return redirect(url_for("dashboard"))
 
 

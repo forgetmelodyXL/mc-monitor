@@ -1468,18 +1468,15 @@
         }, 10000);
     });
 
-    // 页面加载时：顶部提示条自动消失
+    // 顶部提示条：动画结束后移除 DOM
     (function () {
         var banners = document.querySelectorAll('.flash-banner');
         banners.forEach(function (banner) {
-            setTimeout(function () {
-                banner.classList.add('hide');
-                setTimeout(function () {
-                    if (banner.parentElement) {
-                        banner.remove();
-                    }
-                }, 300);
-            }, 4000);
+            banner.addEventListener('animationend', function (e) {
+                if (e.animationName === 'bannerAuto' || e.animationName === 'bannerOut') {
+                    if (banner.parentElement) banner.remove();
+                }
+            });
         });
     })();
 })();

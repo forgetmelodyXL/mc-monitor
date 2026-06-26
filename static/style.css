@@ -1782,11 +1782,11 @@ body.dark-mode .mk-output {
     min-width: 280px;
     opacity: 0;
     transform: translateY(-20px);
-    animation: bannerIn 0.4s ease forwards;
+    animation: bannerAuto 4.7s ease forwards;
 }
 
 .flash-banner.hide {
-    animation: bannerOut 0.3s ease forwards;
+    animation: bannerOut 0.3s ease forwards !important;
 }
 
 .flash-banner-success {
@@ -1830,14 +1830,22 @@ body.dark-mode .mk-output {
     opacity: 1;
 }
 
-@keyframes bannerIn {
-    from {
+@keyframes bannerAuto {
+    0% {
         opacity: 0;
         transform: translateY(-20px);
     }
-    to {
+    8.5% {
         opacity: 1;
         transform: translateY(0);
+    }
+    93.6% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-20px);
     }
 }
 
