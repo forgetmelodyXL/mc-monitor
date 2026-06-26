@@ -68,6 +68,7 @@ def _name_display_width(name):
     chinese = _count_chinese_chars(name)
     return chinese * 2 + (len(name) - chinese)
 
+
 import db as db_module
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1951,17 +1952,17 @@ def admin_toggle_email_setting():
     """AJAX: 切换邮件告警开关或注册邮件通知开关"""
     field = (request.form.get("field") or "").strip()
     value = (request.form.get("value") or "").strip()
-    
+
     if field not in ("email_enabled", "registration_email_enabled"):
         return jsonify({"success": False, "message": "无效的字段"}), 400
-    
+
     if value not in ("0", "1"):
         return jsonify({"success": False, "message": "无效的值"}), 400
-    
+
     if field == "registration_email_enabled" and value == "1":
         if get_setting("email_enabled", "0") != "1":
             return jsonify({"success": False, "message": "请先开启邮件功能"}), 400
-    
+
     set_setting(field, value)
     if field == "email_enabled":
         _audit("toggle_email_setting", f"email_enabled set to {value}")
