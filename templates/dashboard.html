@@ -24,7 +24,7 @@
         {% endif %}
     </span>
     <span class="flash-banner-text">{{ message }}</span>
-    <button type="button" class="flash-banner-close" onclick="this.parentElement.remove()">✕</button>
+    <button type="button" class="flash-banner-close" onclick="var b=this.parentElement;b.classList.add('hide');setTimeout(function(){b.remove()},300)">✕</button>
 </div>
 {% endfor %}
 </div>
@@ -1473,8 +1473,7 @@
         var banners = document.querySelectorAll('.flash-banner');
         banners.forEach(function (banner) {
             setTimeout(function () {
-                banner.style.opacity = '0';
-                banner.style.transform = 'translateY(-100%)';
+                banner.classList.add('hide');
                 setTimeout(function () {
                     if (banner.parentElement) {
                         banner.remove();

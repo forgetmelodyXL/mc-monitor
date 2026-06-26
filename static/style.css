@@ -1780,8 +1780,13 @@ body.dark-mode .mk-output {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
     max-width: 600px;
     min-width: 280px;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    animation: bannerSlideDown 0.4s ease;
+    opacity: 0;
+    transform: translateY(-20px);
+    animation: bannerIn 0.4s ease forwards;
+}
+
+.flash-banner.hide {
+    animation: bannerOut 0.3s ease forwards;
 }
 
 .flash-banner-success {
@@ -1825,13 +1830,24 @@ body.dark-mode .mk-output {
     opacity: 1;
 }
 
-@keyframes bannerSlideDown {
+@keyframes bannerIn {
     from {
         opacity: 0;
-        transform: translateY(-100%);
+        transform: translateY(-20px);
     }
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes bannerOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
     }
 }
