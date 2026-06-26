@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MC Server Monitor — Minecraft 服务器监控面板</title>
+<meta name="description" content="开源、零依赖、纯 Python 的 Minecraft 服务器监控面板，支持 Java/Bedrock 多协议、历史图表、掉线告警、深色模式、PWA">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary: #6c8dff;
+    --primary-dark: #5a7be8;
+    --accent: #8b5cf6;
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --text: #2a2e5b;
+    --text-muted: #9ba0b8;
+    --border: #e6e8f3;
+    --success: #38a169;
+    --error: #e53e3e;
+    --gradient: linear-gradient(135deg, #6c8dff 0%, #8b5cf6 100%);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Navbar */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    z-index: 100;
+    padding: 14px 0;
+  }
+  .nav-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .nav-logo-icon {
+    font-size: 24px;
+  }
+  .nav-links {
+    display: flex;
+    gap: 28px;
+    list-style: none;
+  }
+  .nav-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 14px;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--primary); }
+  .nav-cta {
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-primary {
+    background: var(--gradient);
+    color: white;
+    box-shadow: 0 4px 14px rgba(108, 141, 255, 0.35);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(108, 141, 255, 0.45); }
+  .btn-outline {
+    background: transparent;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+  }
+  .btn-outline:hover { background: var(--primary); color: white; }
+
+  /* Hero */
+  .hero {
+    padding: 140px 24px 80px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -200px; left: 50%;
+    transform: translateX(-50%);
+    width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(108,141,255,0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    background: rgba(108, 141, 255, 0.1);
+    color: var(--primary);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 48px;
+    font-weight: 800;
+    margin-bottom: 16px;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-sub {
+    font-size: 18px;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto 32px;
+  }
+  .hero-actions {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin-bottom: 60px;
+  }
+
+  /* Hero Image Preview */
+  .hero-preview {
+    max-width: 1000px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .preview-mockup {
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(42, 46, 91, 0.12), 0 0 0 1px var(--border);
+    overflow: hidden;
+  }
+  .preview-header {
+    background: #f0f2f8;
+    padding: 10px 16px;
+    display: flex;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .preview-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+  }
+  .dot-red { background: #ff5f57; }
+  .dot-yellow { background: #febc2e; }
+  .dot-green { background: #28c840; }
+  .preview-body {
+    padding: 24px;
+    background: var(--surface);
+  }
+
+  /* Mini dashboard preview */
+  .mini-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .mini-stat-card {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 14px;
+    border: 1px solid var(--border);
+  }
+  .mini-stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .mini-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .mini-stat-value.green { color: var(--success); }
+  .mini-stat-value.red { color: var(--error); }
+
+  .mini-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .mini-table th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mini-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .status-online {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--success);
+    font-weight: 500;
+  }
+  .status-online::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .status-offline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--error);
+    font-weight: 500;
+  }
+  .status-offline::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--error);
+  }
+  .protocol-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(108, 141, 255, 0.1);
+    color: var(--primary);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  /* Features */
+  .features {
+    padding: 80px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .section-title {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+  .section-title h2 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .section-title p {
+    color: var(--text-muted);
+    font-size: 16px;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 28px;
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+  .feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(42, 46, 91, 0.08);
+  }
+  .feature-icon {
+    width: 48px; height: 48px;
+    border-radius: 10px;
+    background: var(--gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 16px;
+    color: white;
+  }
+  .feature-card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .feature-card p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* Protocol Support */
+  .protocols {
+    padding: 80px 24px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .protocols-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .protocol-list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 40px;
+  }
+  .protocol-item {
+    text-align: center;
+    padding: 28px 16px;
+    background: var(--bg);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .protocol-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+  }
+  .protocol-item h4 {
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+  .protocol-item p {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* Screenshots / Demo section */
+  .demo-section {
+    padding: 80px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 40px;
+  }
+  .demo-card {
+    background: var(--surface);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+  .demo-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(42, 46, 91, 0.08);
+  }
+  .demo-img {
+    height: 240px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 60px;
+    position: relative;
+  }
+  .demo-img.chart {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  }
+  .demo-img.admin {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  }
+  .demo-img.alerts {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+  }
+  .demo-body {
+    padding: 20px;
+  }
+  .demo-body h4 {
+    font-size: 16px;
+    margin-bottom: 6px;
+  }
+  .demo-body p {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* CTA Section */
+  .cta-section {
+    padding: 80px 24px;
+    text-align: center;
+    background: var(--gradient);
+    color: white;
+  }
+  .cta-section h2 {
+    font-size: 32px;
+    margin-bottom: 12px;
+  }
+  .cta-section p {
+    font-size: 16px;
+    opacity: 0.9;
+    margin-bottom: 28px;
+  }
+  .cta-section .btn {
+    background: white;
+    color: var(--primary);
+    font-weight: 600;
+  }
+  .cta-section .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Footer */
+  .footer {
+    padding: 40px 24px;
+    background: #1a1d3a;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    font-size: 13px;
+  }
+  .footer a {
+    color: rgba(255, 255, 255, 0.8);
+    text-decoration: none;
+  }
+  .footer a:hover { color: white; }
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 16px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 32px; }
+    .hero-sub { font-size: 16px; }
+    .nav-links { display: none; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .protocol-list { grid-template-columns: repeat(2, 1fr); }
+    .demo-grid { grid-template-columns: 1fr; }
+    .mini-stats { grid-template-columns: repeat(2, 1fr); }
+    .section-title h2 { font-size: 24px; }
+    .cta-section h2 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <span class="nav-logo-icon">🎮</span>
+      <span>MC Server Monitor</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="#features">功能特性</a></li>
+      <li><a href="#protocols">协议支持</a></li>
+      <li><a href="#demo">界面预览</a></li>
+      <li><a href="https://github.com/forgetmelodyXL/mc-monitor" target="_blank">GitHub</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a href="https://github.com/forgetmelodyXL/mc-monitor" target="_blank" class="btn btn-outline">⭐ Star</a>
+      <a href="https://github.com/forgetmelodyXL/mc-monitor#-快速开始" target="_blank" class="btn btn-primary">快速开始</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">✨ v1.6.0 现已发布</div>
+  <h1>MC Server Monitor</h1>
+  <p class="hero-sub">
+    开源、零依赖、纯 Python 的 Minecraft 服务器监控面板<br>
+    原生 TCP + SLP 协议通信，无需任何第三方 API
+  </p>
+  <div class="hero-actions">
+    <a href="https://github.com/forgetmelodyXL/mc-monitor" target="_blank" class="btn btn-primary">🚀 立即部署</a>
+    <a href="#features" class="btn btn-outline">了解更多</a>
+  </div>
+
+  <div class="hero-preview">
+    <div class="preview-mockup">
+      <div class="preview-header">
+        <span class="preview-dot dot-red"></span>
+        <span class="preview-dot dot-yellow"></span>
+        <span class="preview-dot dot-green"></span>
+      </div>
+      <div class="preview-body">
+        <div class="mini-stats">
+          <div class="mini-stat-card">
+            <div class="mini-stat-label">服务器总数</div>
+            <div class="mini-stat-value">12</div>
+          </div>
+          <div class="mini-stat-card">
+            <div class="mini-stat-label">在线</div>
+            <div class="mini-stat-value green">10</div>
+          </div>
+          <div class="mini-stat-card">
+            <div class="mini-stat-label">离线</div>
+            <div class="mini-stat-value red">2</div>
+          </div>
+          <div class="mini-stat-card">
+            <div class="mini-stat-label">玩家总数</div>
+            <div class="mini-stat-value">248</div>
+          </div>
+        </div>
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>名称</th>
+              <th>地址</th>
+              <th>协议</th>
+              <th>状态</th>
+              <th>玩家</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="color:var(--text-muted);font-family:monospace;">1</td>
+              <td><strong>生存服务器</strong></td>
+              <td style="font-family:monospace;color:var(--text-muted);">mc.example.com</td>
+              <td><span class="protocol-badge">SLP</span></td>
+              <td><span class="status-online">在线</span></td>
+              <td>42 / 100</td>
+            </tr>
+            <tr>
+              <td style="color:var(--text-muted);font-family:monospace;">2</td>
+              <td><strong>创造服务器</strong></td>
+              <td style="font-family:monospace;color:var(--text-muted);">creative.example.com</td>
+              <td><span class="protocol-badge">SLP</span></td>
+              <td><span class="status-online">在线</span></td>
+              <td>18 / 50</td>
+            </tr>
+            <tr>
+              <td style="color:var(--text-muted);font-family:monospace;">3</td>
+              <td><strong>基岩版服务器</strong></td>
+              <td style="font-family:monospace;color:var(--text-muted);">be.example.com:19132</td>
+              <td><span class="protocol-badge">Bedrock</span></td>
+              <td><span class="status-offline">离线</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td style="color:var(--text-muted);font-family:monospace;">4</td>
+              <td><strong>小游戏服务器</strong></td>
+              <td style="font-family:monospace;color:var(--text-muted);">mini.example.com</td>
+              <td><span class="protocol-badge">SLP</span></td>
+              <td><span class="status-online">在线</span></td>
+              <td>86 / 200</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features" id="features">
+  <div class="section-title">
+    <h2>强大功能，轻量实现</h2>
+    <p>所有功能均由纯 Python 实现，依赖极少，部署简单</p>
+  </div>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>实时监控</h3>
+      <p>后台定时轮询服务器状态，自动记录在线人数和延迟历史，支持自定义轮询间隔。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📈</div>
+      <h3>历史图表</h3>
+      <p>Chart.js 双 Y 轴折线图，直观展示在线人数和延迟变化趋势，支持时间范围切换。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔔</div>
+      <h3>掉线告警</h3>
+      <p>服务器上下线自动检测，弹窗通知 + 历史告警记录，支持邮件告警推送。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👥</div>
+      <h3>多用户系统</h3>
+      <p>完善的用户注册登录系统，支持超级管理员/管理员/协管员/普通用户四级权限。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎨</div>
+      <h3>深色模式</h3>
+      <p>支持亮色/深色主题切换，跟随系统或手动选择，所有界面完美适配暗色模式。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📱</div>
+      <h3>PWA 支持</h3>
+      <p>可安装到桌面或手机主屏，离线访问基础界面，体验接近原生应用。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>安全防护</h3>
+      <p>CSRF 令牌、Rate Limiting 限流、PBKDF2 密码哈希、HttpOnly Cookie 多重安全保障。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📦</div>
+      <h3>多种部署</h3>
+      <p>支持 Windows EXE 单文件、Docker、Linux 一键脚本、Python 源码等多种部署方式。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🧩</div>
+      <h3>分组管理</h3>
+      <p>服务器按分组归类，支持排序调整，搜索和状态筛选快速定位目标服务器。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Protocols -->
+<section class="protocols" id="protocols">
+  <div class="protocols-inner">
+    <div class="section-title">
+      <h2>多协议支持</h2>
+      <p>一个面板，监控所有类型的服务器</p>
+    </div>
+    <div class="protocol-list">
+      <div class="protocol-item">
+        <div class="protocol-icon">🟫</div>
+        <h4>Java SLP</h4>
+        <p>Minecraft Java 版</p>
+      </div>
+      <div class="protocol-item">
+        <div class="protocol-icon">🟩</div>
+        <h4>Bedrock</h4>
+        <p>基岩版 / Raknet</p>
+      </div>
+      <div class="protocol-item">
+        <div class="protocol-icon">🌐</div>
+        <h4>HTTP(S)</h4>
+        <p>Web 服务健康检查</p>
+      </div>
+      <div class="protocol-item">
+        <div class="protocol-icon">🔌</div>
+        <h4>TCP</h4>
+        <p>通用端口检测</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Demo -->
+<section class="demo-section" id="demo">
+  <div class="section-title">
+    <h2>界面预览</h2>
+    <p>精心设计的现代化界面，操作直观流畅</p>
+  </div>
+  <div class="demo-grid">
+    <div class="demo-card">
+      <div class="demo-img">📊</div>
+      <div class="demo-body">
+        <h4>仪表盘</h4>
+        <p>服务器列表一目了然，状态、玩家数、延迟实时显示</p>
+      </div>
+    </div>
+    <div class="demo-card">
+      <div class="demo-img chart">📈</div>
+      <div class="demo-body">
+        <h4>历史图表</h4>
+        <p>双 Y 轴折线图，在线人数和延迟趋势一览无余</p>
+      </div>
+    </div>
+    <div class="demo-card">
+      <div class="demo-img admin">⚙️</div>
+      <div class="demo-body">
+        <h4>管理后台</h4>
+        <p>用户管理、服务器管理、全局设置一站式操作</p>
+      </div>
+    </div>
+    <div class="demo-card">
+      <div class="demo-img alerts">🔔</div>
+      <div class="demo-body">
+        <h4>告警历史</h4>
+        <p>完整的掉线/恢复记录，支持筛选和批量确认</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2>立即开始使用</h2>
+  <p>开源免费，几分钟即可部署完成</p>
+  <a href="https://github.com/forgetmelodyXL/mc-monitor#-快速开始" target="_blank" class="btn">🚀 快速开始</a>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-links">
+    <a href="https://github.com/forgetmelodyXL/mc-monitor" target="_blank">GitHub</a>
+    <a href="https://github.com/forgetmelodyXL/mc-monitor/blob/main/CHANGELOG.md" target="_blank">更新日志</a>
+    <a href="https://github.com/forgetmelodyXL/mc-monitor/issues" target="_blank">反馈问题</a>
+    <a href="https://github.com/forgetmelodyXL/mc-monitor/discussions" target="_blank">讨论区</a>
+  </div>
+  <p>© 2024–2026 MC Server Monitor · MIT License</p>
+</footer>
+
+</body>
+</html>
