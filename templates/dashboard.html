@@ -1434,6 +1434,12 @@
         });
     })();
 })();
+
+// CSRF Token 获取函数（从 base.html 复制过来，因为 dashboard.html 没有继承 base）
+function getCsrfToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
 </script>
 </body>
 </html>

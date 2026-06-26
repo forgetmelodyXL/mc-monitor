@@ -5,6 +5,30 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.0] - 2026-06-26
+
+### ✨ 新增
+- **统一输入框样式**：所有输入框（text/email/password/number/tel/url/search/date/time/select/textarea）使用统一的设计风格
+- **自定义 Select 箭头**：下拉框使用 SVG 自定义箭头，替换原生丑陋样式
+- **浏览器自动填充修复**：修复 Chrome 自动填充后的黄色背景问题
+- **旧数据库自动兼容**：`get_db()` 自动执行 schema 迁移，确保旧版本数据库可以正常使用所有功能
+
+### 🔧 修复
+- 修复 `getCsrfToken()` 函数在 `dashboard.html` 中未定义的 JS 错误
+- 修复 `get_db()` 在非请求上下文（初始化、CLI）下调用失败的问题
+- 修复 flake8 F823/F541 错误及多个未使用变量警告
+
+### 🎨 优化
+- 移除开发/生产环境区分，统一使用 Waitress 生产级服务器
+- 删除 `MCMONITOR_ENV` 环境变量
+- 统一日志配置：仅输出到文件，Werkzeug 日志级别为 WARNING
+- 删除自动打开浏览器功能（`MCMONITOR_NOBROWSER`）
+- 完善 `.gitignore`，移除本地 IDE 配置目录 `.trae/`
+- 所有输入框添加 hover/focus/disabled 状态
+- number 输入框去除默认上下箭头
+- 复选框/单选框使用主题色高亮
+- 暗色模式下所有输入框样式完整支持
+
 ## [1.4.0] - 2026-06-25
 
 ### ✨ 新增
