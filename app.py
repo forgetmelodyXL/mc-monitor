@@ -2068,10 +2068,14 @@ def dashboard():
 @login_required
 def server_add():
     # 速率限制（每个用户每分钟 5 次）
+    is_ajax = request.is_json or (request.headers.get("Accept") or "").startswith("application/json") or request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if session.get("user_id"):
         allowed, remaining, retry = _check_rate_limit("server_add", f"u{session['user_id']}")
         if not allowed:
-            flash(f"添加服务器过于频繁，请 {retry} 秒后重试", "error")
+            msg = f"添加服务器过于频繁，请 {retry} 秒后重试"
+            if is_ajax:
+                return jsonify({"success": False, "message": msg}), 429
+            flash(msg, "error")
             return redirect(url_for("dashboard"))
     name = (request.form.get("name") or "").strip()
     host = (request.form.get("host") or "").strip()
@@ -2086,11 +2090,17 @@ def server_add():
         if port < 1 or port > 65535:
             raise ValueError()
     except ValueError:
-        flash("端口必须是 1-65535 的整数", "error")
+        msg = "端口必须是 1-65535 的整数"
+        if is_ajax:
+            return jsonify({"success": False, "message": msg}), 400
+        flash(msg, "error")
         return redirect(url_for("dashboard"))
 
     if not name or not host:
-        flash("请填写完整的服务器名称和地址", "error")
+        msg = "请填写完整的服务器名称和地址"
+        if is_ajax:
+            return jsonify({"success": False, "message": msg}), 400
+        flash(msg, "error")
         return redirect(url_for("dashboard"))
 
     db = get_db()
@@ -2137,7 +2147,10 @@ def server_add():
         )
     db.commit()
     _audit("server_add", f"added server: {name}")
-    flash(f"已添加服务器：{name}", "success")
+    msg = f"已添加服务器：{name}"
+    if is_ajax:
+        return jsonify({"success": True, "message": msg})
+    flash(msg, "success")
     return redirect(url_for("dashboard"))
 
 
@@ -2808,7 +2821,7 @@ def minekuai_bind_key():
     """绑定/更新/清除当前用户的麦块联机 API Key。
     传空字符串或仅空白 = 清除绑定。
     """
-    api_key = request.form.get("api_key") or (request.get_json() or {}).get("api_key") or ""
+    api_key = request.form.get("api_key") or (request.get_json(silent=True) or {}).get("api_key") or ""
     api_key = (api_key or "").strip()
     db = get_db()
     # 归一化为：空则 NULL，否则保留
@@ -2818,8 +2831,8 @@ def minekuai_bind_key():
     )
     db.commit()
     message = "已更新 API 密钥" if api_key else "已清除 API 密钥绑定"
-    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json"):
-        return jsonify({"ok": True, "has_key": bool(api_key), "message": message})
+    if request.is_json or (request.headers.get("Accept") or "").startswith("application/json") or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({"success": True, "message": message})
     flash(message, "success")
     return redirect(url_for("dashboard"))
 

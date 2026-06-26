@@ -109,7 +109,7 @@
         <div class="card-header">
             <h2>添加服务器</h2>
         </div>
-        <form class="add-server-form" method="POST" action="{{ url_for('server_add') }}">
+        <form class="ajax-form" id="addServerForm" method="POST" action="{{ url_for('server_add') }}">
             {{ csrf_input() }}
             <div class="form-row">
                 <div class="form-group">
@@ -149,7 +149,7 @@
                     </label>
                 </div>
                 <div class="form-group form-group-action">
-                    <button type="submit" class="btn btn-primary">+ 添加</button>
+                    <button type="submit" class="btn btn-primary" id="addServerBtn">+ 添加</button>
                 </div>
             </div>
             <p class="hint">
@@ -169,7 +169,7 @@
                 </a>
             </span>
         </div>
-        <form class="add-server-form" method="POST" action="{{ url_for('minekuai_bind_key') }}">
+        <form class="ajax-form" id="minekuaiApiKeyForm" method="POST" action="{{ url_for('minekuai_bind_key') }}">
             {{ csrf_input() }}
             <div class="form-row">
                 <div class="form-group" style="flex: 2;">
@@ -177,7 +177,7 @@
                     <input type="text" name="api_key" placeholder="如：mklive_xxxxxxxxxxxx" autocomplete="off">
                 </div>
                 <div class="form-group form-group-action">
-                    <button type="submit" class="btn btn-primary">💾 保存 / 绑定</button>
+                    <button type="submit" class="btn btn-primary" id="minekuaiApiKeyBtn">💾 保存 / 绑定</button>
                 </div>
             </div>
             <p class="hint">留空提交则清除已绑定的密钥。密钥仅保存在本机数据库并通过 HTTPS 以 Authorization: Bearer 方式发送给 minekuai.com。</p>
@@ -1467,6 +1467,47 @@
             f.style.display = 'none';
         });
     })();
+
+    // ---- AJAX 表单提交（麦块 API Key、添加服务器） ----
+    document.querySelectorAll('.ajax-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            var origText = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = '处理中…'; }
+
+            var formData = new FormData(form);
+            fetch(form.getAttribute('action'), {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(function (res) { return res.json().catch(function () { return { success: false, message: '响应格式错误' }; }); })
+            .then(function (data) {
+                if (data.success) {
+                    showToast(data.message || '操作成功', 'success');
+                    // 添加服务器成功后，刷新页面以显示新服务器
+                    if (form.id === 'addServerForm') {
+                        setTimeout(function () { location.reload(); }, 800);
+                    }
+                    // 麦块 API Key 保存成功后，清空输入框
+                    if (form.id === 'minekuaiApiKeyForm') {
+                        form.querySelector('input[name="api_key"]').value = '';
+                    }
+                } else {
+                    showToast(data.message || '操作失败', 'error');
+                }
+            })
+            .catch(function (err) {
+                showToast('网络错误，请重试', 'error');
+            })
+            .finally(function () {
+                if (btn) { btn.disabled = false; btn.textContent = origText; }
+            });
+        });
+    });
 })();
 
 // CSRF Token 获取函数（从 base.html 复制过来，因为 dashboard.html 没有继承 base）
