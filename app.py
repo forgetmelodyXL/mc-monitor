@@ -165,14 +165,14 @@ def _audit(action: str, detail: str = "", user_id=None, username=None):
 # 数据库（委托给 db 模块，支持 SQLite / PostgreSQL / MySQL）
 # ============================================================
 def get_db():
-    db = db_module.get_db()
+    _db = db_module.get_db()
     try:
         if g and not getattr(g, "_schema_ensured", False):
-            _ensure_schema(db)
+            _ensure_schema(_db)
             g._schema_ensured = True
     except RuntimeError:
-        _ensure_schema(db)
-    return db
+        _ensure_schema(_db)
+    return _db
 
 
 @app.teardown_appcontext
@@ -888,9 +888,9 @@ def ping_mc_server(host: str, port: int, timeout: float = 5.0):
         # ---- Phase 4: Optional latency ping ----
         try:
             sock.sendall(_pack_packet(0, struct.pack(">Q", int(time.time() * 1000))))
-            _len2 = _read_varint(sock)
-            _pid2 = _read_varint(sock)
-            _ = _recv_exact(sock, 8)
+            _read_varint(sock)  # len2
+            _read_varint(sock)  # pid2
+            _recv_exact(sock, 8)
         except Exception:
             pass
 
@@ -1241,7 +1241,7 @@ def ping_bedrock_server(host: str, port: int, timeout: float = 5.0):
             offset += str_len
 
         motd = _strip_mc_colors(strings[1]) if len(strings) > 1 else ""
-        protocol = strings[2] if len(strings) > 2 else ""
+        strings[2] if len(strings) > 2 else ""  # protocol (kept for future use)
         version = strings[3] if len(strings) > 3 else ""
         players_online_str = strings[4] if len(strings) > 4 else "0"
         players_max_str = strings[5] if len(strings) > 5 else "0"
@@ -3344,7 +3344,8 @@ def _cleanup_old_data():
 
         # 由于 SQLite 日期格式不一致，先用简单方式：根据 ID 范围估算
         # 更精确的方式：用 checked_at/created_at 字段比较
-        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        # now 未使用，但保留以备将来调试用
+        datetime.utcnow().isoformat(sep=" ", timespec="seconds")
 
         logs_cutoff = (datetime.utcnow() - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
         alerts_cutoff = (datetime.utcnow() - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")

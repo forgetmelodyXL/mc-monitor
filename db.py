@@ -406,7 +406,7 @@ def init_db(db_path=None):
                     "type": "temporary",
                 }
                 _save_first_run_to_env(_first_run_admin_info)
-                print(f"[MC-Monitor] 首次启动：已创建随机密码超级管理员")
+                print("[MC-Monitor] 首次启动：已创建随机密码超级管理员")
                 print(f"[MC-Monitor] 用户名: {username} 密码: {password} — 请登录后立即修改")
             except Exception as e:
                 print(f"[MC-Monitor] 创建超级管理员失败: {e}")
