@@ -751,10 +751,8 @@
             mkInstanceId.value = instanceId;
             mkStatusLabel.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
             appendMkOutput('[实例绑定] ' + (data.message || '成功'));
-            showToast(instanceId ? '实例绑定成功' : '已清除实例绑定', 'success');
         } catch (e) {
             appendMkOutput('[实例绑定] 失败: ' + e.message);
-            showToast('实例绑定失败: ' + e.message, 'error');
         } finally {
             if (mkBindBtn) { mkBindBtn.disabled = false; mkBindBtn.textContent = '保存'; }
         }
@@ -789,11 +787,9 @@
                         output += '\n' + JSON.stringify(data, null, 2);
                     }
                     const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
-                    showToast((actionNames[action] || action) + '指令发送成功', 'success');
                 } else {
                     if (data && data.errors) output += '\n❌ ' + JSON.stringify(data.errors);
                     const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
-                    showToast((actionNames[action] || action) + '指令发送失败', 'error');
                 }
                 writeMkOutput(output);
             } catch (e) {
@@ -825,14 +821,8 @@
                 '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
                 JSON.stringify(data, null, 2));
             mkCmdInput.value = '';
-            if (res.ok) {
-                showToast('命令发送成功', 'success');
-            } else {
-                showToast('命令发送失败', 'error');
-            }
         } catch (e) {
             writeMkOutput('[COMMAND] 失败: ' + e.message);
-            showToast('命令发送失败: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = oldText;
@@ -968,7 +958,7 @@
     })();
 
     // ---- 刷新 ----
-    async function refresh() {
+    async function refresh(isManual) {
         if (refreshBtn) {
             refreshBtn.disabled = true;
             refreshBtn.textContent = '⟳ 刷新中…';
@@ -979,8 +969,10 @@
             const data = await res.json();
             updateCards(data);
             if (window._applyServerFilter) window._applyServerFilter();
+            if (isManual) showToast('刷新成功', 'success');
         } catch (e) {
             lastRefreshEl.textContent = '刷新失败：' + e.message;
+            if (isManual) showToast('刷新失败：' + e.message, 'error');
         } finally {
             if (refreshBtn) {
                 refreshBtn.disabled = false;
@@ -992,15 +984,15 @@
     function setupAuto() {
         if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
         if (autoRefreshEl && autoRefreshEl.checked) {
-            autoTimer = setInterval(refresh, 30000);
+            autoTimer = setInterval(function () { refresh(false); }, 30000);
         }
     }
 
-    if (refreshBtn) refreshBtn.addEventListener('click', refresh);
+    if (refreshBtn) refreshBtn.addEventListener('click', function () { refresh(true); });
     if (autoRefreshEl) autoRefreshEl.addEventListener('change', setupAuto);
 
     setupAuto();
-    refresh();
+    refresh(false);
 
     // ---- 历史图表 ----
     const _chartInstances = {};
