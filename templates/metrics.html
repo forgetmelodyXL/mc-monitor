@@ -29,7 +29,7 @@
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
             <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ username }} · 管理员 ▾</button>
+                <button class="user-dropdown-btn user-tag">{{ username }} · {{ role_label }} ▾</button>
                 <div class="user-dropdown-menu">
                     <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>

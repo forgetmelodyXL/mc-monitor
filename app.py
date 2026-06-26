@@ -15,6 +15,53 @@ import concurrent.futures
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
+# Beijing timezone (UTC+8)
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+def now_beijing():
+    """Return current datetime in Beijing timezone."""
+    return datetime.now(BEIJING_TZ)
+
+
+def _validate_host(host):
+    """Validate host is a valid domain name or IP address.
+    Returns (True, "") if valid, (False, error_message) if invalid."""
+    # IPv4 pattern
+    ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    # IPv6 pattern (simplified)
+    ipv6_pattern = r'^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$'
+    # Domain pattern
+    domain_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+
+    if re.match(ipv4_pattern, host):
+        # Validate each octet is 0-255
+        parts = host.split('.')
+        if all(0 <= int(p) <= 255 for p in parts):
+            return True, ""
+        return False, "服务器地址格式不正确，请输入有效的域名或 IP 地址"
+    if re.match(ipv6_pattern, host):
+        return True, ""
+    if re.match(domain_pattern, host):
+        return True, ""
+    return False, "服务器地址格式不正确，请输入有效的域名或 IP 地址"
+
+
+def _get_role_label():
+    """Get the current user's role display label (Chinese)."""
+    role = session.get("role", "user")
+    labels = {
+        "super_admin": "超级管理员",
+        "admin": "管理员",
+        "moderator": "协管员",
+        "user": "普通用户",
+    }
+    return labels.get(role, "普通用户")
+
+
+def _count_chinese_chars(name):
+    """Count the number of Chinese characters in a string."""
+    return len(re.findall(r'[\u4e00-\u9fff]', name))
+
 import db as db_module
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -229,7 +276,7 @@ def _ensure_schema(db):
 # ============================================================
 # 数据库迁移系统
 # ============================================================
-_SCHEMA_VERSION = 7  # 当前代码库对应的 schema 版本
+_SCHEMA_VERSION = 8  # 当前代码库对应的 schema 版本
 
 
 def _get_schema_version(conn):
@@ -246,7 +293,7 @@ def _set_schema_version(conn, version):
     conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', ?, ?)"
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (str(version), datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
+        (str(version), now_beijing().isoformat(sep=" ", timespec="seconds")),
     )
 
 
@@ -347,6 +394,11 @@ def _run_migrations(conn):
         # v7: 显示名称和注册邮件通知
         (7, "add_display_name_and_reg_email", [
             "ALTER TABLE users ADD COLUMN display_name TEXT",
+        ]),
+        # v8: 服务器名称全局唯一索引
+        (8, "add_servers_name_unique_index", [
+            "DELETE FROM servers WHERE id NOT IN (SELECT MIN(id) FROM servers GROUP BY name)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_name ON servers(name)",
         ]),
     ]
 
@@ -523,7 +575,7 @@ def get_setting(key: str, default: str = "") -> str:
 def set_setting(key: str, value: str) -> None:
     """写入 settings 表中的开关值"""
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+    now = now_beijing().isoformat(sep=" ", timespec="seconds")
     db.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
@@ -592,13 +644,13 @@ def _check_email_cooldown(user_id: int, server_id: int) -> bool:
         "SELECT email_cooldown FROM users WHERE id = ?", (user_id,)
     ).fetchone()
     cooldown_min = int(row_get(user_row, "email_cooldown", 30))
-    elapsed = (datetime.now(timezone.utc) - last).total_seconds() / 60
+    elapsed = (now_beijing() - last).total_seconds() / 60
     return elapsed < cooldown_min
 
 
 def _set_email_cooldown(user_id: int, server_id: int) -> None:
     """设置冷却时间"""
-    _EMAIL_COOLDOWN[(user_id, server_id)] = datetime.now(timezone.utc)
+    _EMAIL_COOLDOWN[(user_id, server_id)] = now_beijing()
 
 
 def send_alert_email(user_id: int, server_id: int, server_name: str,
@@ -624,7 +676,7 @@ def send_alert_email(user_id: int, server_id: int, server_name: str,
         f"{message}\n"
         f"\n"
         f"服务器: {server_name}\n"
-        f"时间: {datetime.now(timezone.utc).isoformat(sep=' ', timespec='seconds')} UTC\n"
+        f"时间: {now_beijing().isoformat(sep=' ', timespec='seconds')} 北京时间\n"
         f"\n"
         f"-- MC 服务器监控\n"
     )
@@ -675,7 +727,7 @@ def metrics():
         "SELECT AVG(latency_ms) as avg_ms FROM status_logs WHERE online = 1 AND latency_ms IS NOT NULL"
     )
     avg_latency = round(avg_lat["avg_ms"], 1) if avg_lat and avg_lat["avg_ms"] else 0
-    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(sep=" ", timespec="seconds")
+    since = (now_beijing() - timedelta(hours=24)).isoformat(sep=" ", timespec="seconds")
     fail_24h = db.fetchone(
         "SELECT COUNT(*) as cnt FROM status_logs WHERE online = 0 AND checked_at >= ?", (since,)
     )
@@ -705,6 +757,7 @@ def metrics():
         fail_count_24h=fail_count_24h, check_count_24h=check_count_24h,
         servers=servers, recent_fails=recent_fails, roles=db_module.ROLES,
         username=session.get("username", ""),
+        role_label=_get_role_label(),
     )
 
 
@@ -1369,7 +1422,8 @@ def index():
         server_list.append(s_dict)
     return render_template("index.html", servers=server_list,
                            logged_in=("user_id" in session),
-                           current_username=session.get("username", ""))
+                           current_username=session.get("username", ""),
+                           role_label=_get_role_label())
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -1416,7 +1470,7 @@ def register():
                 else:
                     db.execute(
                         "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                        (username, email, hash_password(password), datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
+                        (username, email, hash_password(password), now_beijing().isoformat(sep=" ", timespec="seconds")),
                     )
                     db.commit()
                     flash("注册成功，请登录", "success")
@@ -1578,6 +1632,7 @@ def user_profile():
         profile_error=profile_error,
         email_error=email_error,
         username=session.get("username", ""),
+        role_label=_get_role_label(),
     )
 
 
@@ -1649,6 +1704,7 @@ def admin_panel():
     smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
     smtp_user = get_setting("email_smtp_user", "")
     smtp_pass_set = bool(get_setting("email_smtp_password", ""))
+    smtp_password = get_setting("email_smtp_password", "")
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
     reg_email_enabled = get_setting("registration_email_enabled", "0") == "1"
@@ -1668,11 +1724,12 @@ def admin_panel():
                            smtp_port=smtp_port,
                            smtp_ssl=smtp_ssl,
                            smtp_user=smtp_user,
-                           smtp_pass_set=smtp_pass_set,
+                           smtp_password=smtp_password,
                            email_from=email_from,
                            subject_prefix=subject_prefix,
                            registration_email_enabled=reg_email_enabled,
-                           current_username=session.get("username", ""))
+                           current_username=session.get("username", ""),
+                           role_label=_get_role_label())
 
 
 @app.route("/admin/settings/register-toggle", methods=["POST"])
@@ -1760,12 +1817,11 @@ def admin_email_settings():
         if action == "save":
             set_setting("email_enabled", "1" if request.form.get("email_enabled") else "0")
             set_setting("email_smtp_host", request.form.get("smtp_host", "").strip())
-            set_setting("email_smtp_port", request.form.get("smtp_port", "465").strip() or "465")
+            set_setting("email_smtp_port", request.form.get("smtp_port", "").strip())
             set_setting("email_smtp_ssl", "1" if request.form.get("smtp_ssl") else "0")
             set_setting("email_smtp_user", request.form.get("smtp_user", "").strip())
             new_pass = request.form.get("smtp_password", "").strip()
-            if new_pass:
-                set_setting("email_smtp_password", new_pass)
+            set_setting("email_smtp_password", new_pass)
             set_setting("email_from", request.form.get("email_from", "").strip())
             set_setting("email_subject_prefix", request.form.get("subject_prefix", "[MC监控]").strip() or "[MC监控]")
             # 注册邮件通知开关：仅在邮件功能开启时允许开启
@@ -1802,24 +1858,112 @@ def admin_email_settings():
     smtp_ssl = get_setting("email_smtp_ssl", "1") == "1"
     smtp_user = get_setting("email_smtp_user", "")
     smtp_pass_set = bool(get_setting("email_smtp_password", ""))
+    smtp_password = get_setting("email_smtp_password", "")
     email_from = get_setting("email_from", "")
     subject_prefix = get_setting("email_subject_prefix", "[MC监控]")
     reg_email_enabled = get_setting("registration_email_enabled", "0") == "1"
 
+    # Get statistics for template
+    users_raw = db.execute(
+        "SELECT id, username, is_admin, role, created_at, "
+        "(SELECT COUNT(*) FROM servers s WHERE s.user_id = u.id) AS server_count "
+        "FROM users u ORDER BY u.id ASC"
+    ).fetchall()
+    users = []
+    for u in users_raw:
+        user = dict(u)
+        user["role_label"] = db_module.get_role_label(
+            row_get(u, "role", "admin" if u["is_admin"] else "user")
+        )
+        users.append(user)
+    server_rows = db.execute(
+        "SELECT s.*, u.username AS owner_name, u.display_name "
+        "FROM servers s JOIN users u ON s.user_id = u.id ORDER BY s.id DESC"
+    ).fetchall()
+    servers = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "host": r["host"],
+            "port": r["port"],
+            "owner_name": r["owner_name"],
+            "owner_display": row_get(r, "display_name", "") or _mask_email(r["owner_name"]),
+            "created_at": row_get(r, "created_at", ""),
+            "is_public": bool(row_get(r, "is_public", 0)),
+        }
+        for r in server_rows
+    ]
+    total_users = len(users)
+    total_servers = len(servers)
+    total_public = sum(1 for s in servers if s["is_public"])
+    # Other settings
+    reg_enabled = get_setting("registration_enabled", "1") == "1"
+    maint_enabled = get_setting("maintenance_enabled", "0") == "1"
+    cleanup_logs_days = get_setting("cleanup_logs_days", "30")
+    cleanup_alerts_days = get_setting("cleanup_alerts_days", "7")
+    # Statistics
+    count_row = db.execute(
+        """SELECT
+           (SELECT COUNT(*) FROM status_logs) AS logs_count,
+           (SELECT COUNT(*) FROM alerts) AS alerts_count
+           """
+    ).fetchone()
+    status_logs_count = count_row["logs_count"] if count_row else 0
+    alerts_count = count_row["alerts_count"] if count_row else 0
+
     return render_template(
         "admin.html",
+        users=users, servers=servers,
+        total_users=total_users,
+        total_servers=total_servers,
+        total_public=total_public,
+        registration_enabled=reg_enabled,
+        maintenance_enabled=maint_enabled,
+        cleanup_logs_days=cleanup_logs_days,
+        cleanup_alerts_days=cleanup_alerts_days,
+        status_logs_count=status_logs_count,
+        alerts_count=alerts_count,
         email_settings=True,
         email_enabled=email_enabled,
         smtp_host=smtp_host,
         smtp_port=smtp_port,
         smtp_ssl=smtp_ssl,
         smtp_user=smtp_user,
-        smtp_pass_set=smtp_pass_set,
+        smtp_password=smtp_password,
         email_from=email_from,
         subject_prefix=subject_prefix,
         registration_email_enabled=reg_email_enabled,
         current_username=session.get("username", ""),
+        app_version=APP_VERSION,
+        role_label=_get_role_label(),
     )
+
+
+@app.route("/admin/settings/email/toggle", methods=["POST"])
+@admin_required
+def admin_toggle_email_setting():
+    """AJAX: 切换邮件告警开关或注册邮件通知开关"""
+    field = (request.form.get("field") or "").strip()
+    value = (request.form.get("value") or "").strip()
+    
+    if field not in ("email_enabled", "registration_email_enabled"):
+        return jsonify({"success": False, "message": "无效的字段"}), 400
+    
+    if value not in ("0", "1"):
+        return jsonify({"success": False, "message": "无效的值"}), 400
+    
+    if field == "registration_email_enabled" and value == "1":
+        if get_setting("email_enabled", "0") != "1":
+            return jsonify({"success": False, "message": "请先开启邮件功能"}), 400
+    
+    set_setting(field, value)
+    if field == "email_enabled":
+        _audit("toggle_email_setting", f"email_enabled set to {value}")
+        label = "邮件告警已开启" if value == "1" else "邮件告警已关闭"
+    else:
+        _audit("toggle_email_setting", f"registration_email_enabled set to {value}")
+        label = "注册邮件通知已开启" if value == "1" else "注册邮件通知已关闭"
+    return jsonify({"success": True, "message": label})
 
 
 @app.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
@@ -1906,11 +2050,16 @@ def admin_toggle_admin(user_id):
 @admin_required
 def admin_set_role(user_id):
     """设置用户角色"""
+    is_ajax = request.headers.get('X-Requested-With', '') == 'XMLHttpRequest'
     new_role = (request.form.get("role") or "").strip()
     if new_role not in db_module.ROLES:
+        if is_ajax:
+            return jsonify({"success": False, "message": "无效的角色"}), 400
         flash("无效的角色", "error")
         return redirect(url_for("admin_panel"))
     if new_role == "super_admin":
+        if is_ajax:
+            return jsonify({"success": False, "message": "超级管理员有且仅有一个，不能将其他用户设为超级管理员"}), 400
         flash("超级管理员有且仅有一个，不能将其他用户设为超级管理员", "error")
         return redirect(url_for("admin_panel"))
     conn = get_db()
@@ -1919,16 +2068,22 @@ def admin_set_role(user_id):
         abort(404)
     target_role = row_get(user, "role", "user")
     if target_role == "super_admin":
+        if is_ajax:
+            return jsonify({"success": False, "message": "不能修改超级管理员的角色"}), 400
         flash("不能修改超级管理员的角色", "error")
         return redirect(url_for("admin_panel"))
     actor_role = session.get("role", "user")
     if not db_module.can_manage_role(actor_role, target_role):
+        if is_ajax:
+            return jsonify({"success": False, "message": "你不能管理该用户的角色"}), 400
         flash("你不能管理该用户的角色", "error")
         return redirect(url_for("admin_panel"))
     is_admin = 1 if new_role in ("admin", "super_admin") else 0
     conn.execute("UPDATE users SET role = ?, is_admin = ? WHERE id = ?", (new_role, is_admin, user_id))
     conn.commit()
     _audit("admin_set_role", f"target: {user['username']} -> {new_role}")
+    if is_ajax:
+        return jsonify({"success": True, "message": f"已将用户 {user['username']} 设为{db_module.get_role_label(new_role)}"})
     flash(f"已将用户 {user['username']} 设为{db_module.get_role_label(new_role)}", "success")
     return redirect(url_for("admin_panel"))
 
@@ -2061,7 +2216,8 @@ def dashboard():
     return render_template("dashboard.html",
                            servers=servers,
                            groups=groups,
-                           username=session.get("username", ""))
+                           username=session.get("username", ""),
+                           role_label=_get_role_label())
 
 
 @app.route("/server/add", methods=["POST"])
@@ -2093,8 +2249,29 @@ def server_add():
         flash("请填写完整的服务器名称和地址", "error")
         return redirect(url_for("dashboard"))
 
+    chinese_count = _count_chinese_chars(name)
+    if len(name) < 4 or len(name) > 16:
+        flash("服务器名称长度必须在 4-16 个字符之间", "error")
+        return redirect(url_for("dashboard"))
+    if chinese_count < 2:
+        flash("服务器名称至少需要 2 个中文字符", "error")
+        return redirect(url_for("dashboard"))
+    if chinese_count > 8:
+        flash("服务器名称最多 8 个中文字符", "error")
+        return redirect(url_for("dashboard"))
+
+    host_valid, host_error = _validate_host(host)
+    if not host_valid:
+        flash(host_error, "error")
+        return redirect(url_for("dashboard"))
+
     db = get_db()
     _ensure_schema(db)
+    # Check server name uniqueness
+    existing = db.execute("SELECT COUNT(*) FROM servers WHERE name = ?", (name,)).fetchone()
+    if existing and existing[0] > 0:
+        flash("该服务器名称已被使用，请更换名称", "error")
+        return redirect(url_for("dashboard"))
     # 验证 group_id 归属当前用户
     group_id = None
     if group_id_str:
@@ -2120,7 +2297,7 @@ def server_add():
                 port,
                 protocol,
                 show_players,
-                datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                now_beijing().isoformat(sep=" ", timespec="seconds"),
             ),
         )
     except sqlite3.OperationalError:
@@ -2132,7 +2309,7 @@ def server_add():
                 name[:64],
                 host[:253],
                 port,
-                datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                now_beijing().isoformat(sep=" ", timespec="seconds"),
             ),
         )
     db.commit()
@@ -2185,6 +2362,29 @@ def server_edit(server_id):
     if not name or not host:
         flash("请填写完整的服务器名称和地址", "error")
         return redirect(url_for("dashboard"))
+
+    chinese_count = _count_chinese_chars(name)
+    if len(name) < 4 or len(name) > 16:
+        flash("服务器名称长度必须在 4-16 个字符之间", "error")
+        return redirect(url_for("dashboard"))
+    if chinese_count < 2:
+        flash("服务器名称至少需要 2 个中文字符", "error")
+        return redirect(url_for("dashboard"))
+    if chinese_count > 8:
+        flash("服务器名称最多 8 个中文字符", "error")
+        return redirect(url_for("dashboard"))
+
+    host_valid, host_error = _validate_host(host)
+    if not host_valid:
+        flash(host_error, "error")
+        return redirect(url_for("dashboard"))
+
+    # Check server name uniqueness (exclude self)
+    existing = db.execute("SELECT COUNT(*) FROM servers WHERE name = ? AND id != ?", (name, server_id)).fetchone()
+    if existing and existing[0] > 0:
+        flash("该服务器名称已被使用，请更换名称", "error")
+        return redirect(url_for("dashboard"))
+
     try:
         db.execute(
             "UPDATE servers SET name = ?, host = ?, port = ?, protocol = ? WHERE id = ?",
@@ -2334,7 +2534,7 @@ def group_add():
     db.execute(
         "INSERT INTO server_groups (user_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
         (session["user_id"], name[:32], max_order + 1,
-         datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
+         now_beijing().isoformat(sep=" ", timespec="seconds")),
     )
     db.commit()
     _audit("group_add", f"created group: {name}")
@@ -2575,7 +2775,7 @@ def api_public_status():
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
             "owner_display": row_get(s, "display_name", "") or _mask_email(row_get(s, "owner_name", "") or ""),
-            "checked_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+            "checked_at": now_beijing().isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
         if online:
@@ -2608,7 +2808,7 @@ def api_public_status():
         "online": total_online,
         "offline": len(results) - total_online,
         "total_players": total_players,
-        "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+        "updated_at": now_beijing().isoformat(sep=" ", timespec="seconds"),
     })
 
 
@@ -2656,7 +2856,7 @@ def api_status():
             "motd": info.get("motd") or "",
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
-            "checked_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+            "checked_at": now_beijing().isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
         try:
@@ -3239,7 +3439,7 @@ def _poll_all_servers():
                     pass
 
         # 批量写入数据库，同时检测状态变化生成告警
-        now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+        now = now_beijing().isoformat(sep=" ", timespec="seconds")
         alerts_to_insert = []
 
         for r in results:
@@ -3345,12 +3545,12 @@ def _cleanup_old_data():
         # 由于 SQLite 日期格式不一致，先用简单方式：根据 ID 范围估算
         # 更精确的方式：用 checked_at/created_at 字段比较
         # now 未使用，但保留以备将来调试用
-        datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
+        now_beijing().isoformat(sep=" ", timespec="seconds")
 
-        logs_cutoff = (datetime.now(timezone.utc) - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
-        alerts_cutoff = (datetime.now(timezone.utc) - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")
+        logs_cutoff = (now_beijing() - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
+        alerts_cutoff = (now_beijing() - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")
         # 未读告警最多 30 天
-        unread_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(sep=" ", timespec="seconds")
+        unread_cutoff = (now_beijing() - timedelta(days=30)).isoformat(sep=" ", timespec="seconds")
 
         # 删除过期日志
         log_cursor = db.execute(
@@ -3542,6 +3742,7 @@ def alerts_history():
         event_filter=event_filter,
         stats=stats,
         username=session.get("username", ""),
+        role_label=_get_role_label(),
     )
 
 

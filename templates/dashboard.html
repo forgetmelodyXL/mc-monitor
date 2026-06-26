@@ -7,7 +7,6 @@
     <title>仪表盘 - MC 服务器监控</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body class="dashboard-body">
 {% from "base.html" import csrf_input with context %}
@@ -42,7 +41,7 @@
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
             <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ username }} ▾</button>
+                <button class="user-dropdown-btn user-tag">{{ username }} · {{ role_label }} ▾</button>
                 <div class="user-dropdown-menu" id="userDropdownMenu">
                     <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
@@ -204,6 +203,7 @@
                     <input type="checkbox" id="autoRefresh" checked>
                     每 30 秒自动刷新
                 </label>
+                <button id="sortBtn" class="btn btn-sm btn-outline">📝 修改排序</button>
             </div>
         </div>
         <!-- 搜索 & 筛选 -->
@@ -222,7 +222,7 @@
             <table class="server-table">
                 <thead>
                     <tr>
-                        <th></th>
+                        <th>ID</th>
                         <th>名称</th>
                         <th>地址</th>
                         <th>协议</th>
@@ -242,7 +242,7 @@
                         data-port="{{ s.port }}"
                         data-protocol="{{ s.protocol }}"
                         data-minekuai-instance-id="{{ s.minekuai_instance_id or '' }}">
-                        <td class="drag-handle" title="拖动排序">≡</td>
+                        <td class="server-id-cell">{{ s.id }}</td>
                         <td>
                             <div class="server-name-cell">{{ s.name }}</div>
                             <span class="motd-content hidden" style="display:none;">—</span>
@@ -307,24 +307,12 @@
                             </div>
                         </td>
                     </tr>
-                    <!-- 图表行（默认隐藏） -->
-                    <tr class="chart-row hidden" data-server-id="{{ s.id }}">
-                        <td colspan="9">
-                            <div class="server-chart-box">
-                                <div class="server-chart-header">
-                                    <span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>
-                                    <button type="button" class="btn btn-sm btn-chart-close" data-server-id="{{ s.id }}" style="padding: 2px 8px; font-size: 12px;">收起</button>
-                                </div>
-                                <div style="position: relative; height: 160px;">
-                                    <canvas class="server-chart" data-server-id="{{ s.id }}"></canvas>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        <!-- 图表区域（独立于表格，避免干扰拖拽排序） -->
+        <div id="chartArea" style="margin-top: 12px;"></div>
         {% else %}
         <div class="empty-state">
             <p>你还没有添加任何服务器，先在上方添加一台吧！</p>
@@ -927,15 +915,12 @@
                 const matchFilter = currentFilter === 'all' ||
                     (currentFilter === 'online' && isOnline) ||
                     (currentFilter === 'offline' && isOffline);
-                // 同时控制 chart-row 的显示
-                const chartRow = document.querySelector('.chart-row[data-server-id="' + row.dataset.serverId + '"]');
+                // chart-section is outside table - search/filter only affects table rows
                 if (matchText && matchFilter) {
                     row.style.display = '';
-                    if (chartRow && !chartRow.classList.contains('hidden')) chartRow.style.display = '';
                     visible++;
                 } else {
                     row.style.display = 'none';
-                    if (chartRow) chartRow.style.display = 'none';
                 }
             });
             if (serverCountLabel) {
@@ -1016,8 +1001,9 @@
     }
 
     async function _loadAndRenderChart(serverId, row) {
-        const chartRow = document.querySelector('.chart-row[data-server-id="' + serverId + '"]');
-        const canvas = chartRow ? chartRow.querySelector('.server-chart') : null;
+        const chartArea = document.getElementById('chartArea');
+        let chartSection = chartArea.querySelector('.chart-section[data-server-id="' + serverId + '"]');
+        const canvas = chartSection ? chartSection.querySelector('.server-chart') : null;
         if (!canvas) return;
 
         if (_chartInstances[serverId]) {
@@ -1171,33 +1157,67 @@
         btn.addEventListener('click', async function () {
             const id = parseInt(this.dataset.serverId, 10);
             const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
-            const chartRow = document.querySelector('.chart-row[data-server-id="' + id + '"]');
-            if (!chartRow) return;
+            const chartArea = document.getElementById('chartArea');
+            let chartSection = chartArea.querySelector('.chart-section[data-server-id="' + id + '"]');
 
             const btnText = this.textContent.trim();
             if (btnText === '📈 图表') {
-                chartRow.classList.remove('hidden');
+                if (!chartSection) {
+                    chartSection = document.createElement('div');
+                    chartSection.className = 'chart-section';
+                    chartSection.dataset.serverId = id;
+                    chartSection.innerHTML = '<div class="server-chart-box">'
+                        + '<div class="server-chart-header">'
+                        + '<span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>'
+                        + '<button type="button" class="btn btn-sm btn-chart-close" data-server-id="' + id + '" style="padding: 2px 8px; font-size: 12px;">收起</button>'
+                        + '</div>'
+                        + '<div style="position: relative; height: 160px;">'
+                        + '<canvas class="server-chart" data-server-id="' + id + '"></canvas>'
+                        + '</div>'
+                        + '</div>';
+                    chartArea.appendChild(chartSection);
+                    // Add close button listener
+                    chartSection.querySelector('.btn-chart-close').addEventListener('click', function () {
+                        const sid = parseInt(this.dataset.serverId, 10);
+                        const section = chartArea.querySelector('.chart-section[data-server-id="' + sid + '"]');
+                        if (section) {
+                            if (_chartInstances[sid]) { _chartInstances[sid].destroy(); delete _chartInstances[sid]; }
+                            section.remove();
+                        }
+                        const r = document.querySelector('.server-row[data-server-id="' + sid + '"]');
+                        if (r) {
+                            const showBtn = r.querySelector('.btn-show-chart');
+                            if (showBtn) showBtn.textContent = '📈 图表';
+                        }
+                    });
+                }
                 this.textContent = '📈 收起';
                 await _loadAndRenderChart(id, row);
             } else {
-                chartRow.classList.add('hidden');
+                if (chartSection) {
+                    if (_chartInstances[id]) { _chartInstances[id].destroy(); delete _chartInstances[id]; }
+                    chartSection.remove();
+                }
                 this.textContent = '📈 图表';
             }
         });
     });
 
-    // ---- 收起图表按钮 ----
-    document.querySelectorAll('.btn-chart-close').forEach(btn => {
-        btn.addEventListener('click', function () {
-            const id = parseInt(this.dataset.serverId, 10);
-            const chartRow = document.querySelector('.chart-row[data-server-id="' + id + '"]');
-            if (chartRow) chartRow.classList.add('hidden');
+    // ---- 收起图表按钮（委托给 chartArea） ----
+    document.getElementById('chartArea').addEventListener('click', function (e) {
+        if (e.target.classList.contains('btn-chart-close')) {
+            const id = parseInt(e.target.dataset.serverId, 10);
+            const section = this.querySelector('.chart-section[data-server-id="' + id + '"]');
+            if (section) {
+                if (_chartInstances[id]) { _chartInstances[id].destroy(); delete _chartInstances[id]; }
+                section.remove();
+            }
             const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
             if (row) {
                 const showBtn = row.querySelector('.btn-show-chart');
                 if (showBtn) showBtn.textContent = '📈 图表';
             }
-        });
+        }
     });
 
     // ---- 告警通知系统 ----
@@ -1390,46 +1410,6 @@
         init();
     })();
 
-    // ---- SortableJS: 拖拽排序 ----
-    (function () {
-        const tbody = document.getElementById('serverTableBody');
-        if (!tbody) return;
-
-        // 过滤掉 chart-row，只排序 server-row
-        const sortable = new Sortable(tbody, {
-            handle: '.drag-handle',
-            draggable: '.server-row',
-            ghostClass: 'sortable-ghost',
-            chosenClass: 'sortable-chosen',
-            animation: 150,
-            onEnd: async function (evt) {
-                // 收集新顺序
-                const rows = tbody.querySelectorAll('.server-row');
-                const order = [];
-                rows.forEach(row => {
-                    order.push(parseInt(row.dataset.serverId, 10));
-                });
-
-                try {
-                    const res = await fetch('/server/reorder', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-CSRF-Token': getCsrfToken()
-                        },
-                        body: JSON.stringify({ order: order })
-                    });
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    showToast('排序已保存', 'success');
-                } catch (e) {
-                    console.error('排序保存失败:', e);
-                    showToast('排序保存失败', 'error');
-                }
-            }
-        });
-    })();
-
     // ---- PWA: 注册 Service Worker ----
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
@@ -1489,6 +1469,24 @@ function getCsrfToken() {
 }
 </script>
 
+<!-- 排序弹窗 -->
+<div class="modal-overlay" id="sortModal" style="display:none;" onclick="if(event.target===this) closeSortModal()">
+    <div class="modal-content" style="max-width:480px;">
+        <div class="modal-header">
+            <h3>修改服务器排序</h3>
+            <button type="button" class="modal-close" onclick="closeSortModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="color: #6b6f8a; margin: 0 0 8px 0;">使用 ▲▼ 按钮调整顺序，保存后服务器列表将按此处顺序显示</p>
+            <ul id="sortList" style="list-style: none; padding: 0; margin: 0;"></ul>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeSortModal()">取消</button>
+            <button type="button" class="btn btn-primary" onclick="submitSortOrder()">保存排序</button>
+        </div>
+    </div>
+</div>
+
 <!-- 删除确认弹窗 -->
 <div class="modal-overlay" id="confirmOverlay" style="display:none;">
     <div class="modal-content" style="max-width:400px;">
@@ -1532,6 +1530,102 @@ function doConfirm() {
 document.getElementById('confirmOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeConfirm();
 });
+</script>
+
+<!-- 排序弹窗脚本（独立脚本块，确保在 DOM 完全加载后绑定） -->
+<script>
+(function() {
+    var sortBtn = document.getElementById('sortBtn');
+    if (!sortBtn) return;
+
+    sortBtn.addEventListener('click', function() {
+        var tbody = document.getElementById('serverTableBody');
+        if (!tbody) return;
+        var rows = tbody.querySelectorAll('.server-row');
+        var listEl = document.getElementById('sortList');
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        rows.forEach(function(row) {
+            var nameEl = row.querySelector('.server-name-cell');
+            if (!nameEl) return;
+            var li = document.createElement('li');
+            li.className = 'sort-item';
+            var idx = listEl.children.length + 1;
+            li.innerHTML =
+                '<span class="sort-order">' + idx + '</span>' +
+                '<span class="sort-name">' + nameEl.textContent.trim() + '</span>' +
+                '<span class="sort-arrows">' +
+                '<button type="button" class="btn btn-sm btn-outline sort-up" onclick="moveSortItem(this, -1)" title="上移">▲</button>' +
+                '<button type="button" class="btn btn-sm btn-outline sort-down" onclick="moveSortItem(this, 1)" title="下移">▼</button>' +
+                '</span>';
+            li.dataset.serverId = row.dataset.serverId;
+            listEl.appendChild(li);
+        });
+        document.getElementById('sortModal').style.display = 'flex';
+    });
+})();
+
+function closeSortModal() {
+    document.getElementById('sortModal').style.display = 'none';
+}
+
+function moveSortItem(btn, direction) {
+    var li = btn.closest('.sort-item');
+    var listEl = document.getElementById('sortList');
+    var items = Array.from(listEl.querySelectorAll('.sort-item'));
+    var idx = items.indexOf(li);
+    var newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= items.length) return;
+    if (direction < 0) {
+        listEl.insertBefore(li, items[newIdx]);
+    } else {
+        listEl.insertBefore(li, items[newIdx].nextSibling);
+    }
+    updateSortNumbers();
+}
+
+function updateSortNumbers() {
+    var items = document.querySelectorAll('#sortList .sort-item');
+    items.forEach(function(item, i) {
+        item.querySelector('.sort-order').textContent = i + 1;
+    });
+}
+
+async function submitSortOrder() {
+    var items = document.querySelectorAll('#sortList .sort-item');
+    var order = [];
+    items.forEach(function(item) {
+        order.push(parseInt(item.dataset.serverId, 10));
+    });
+    try {
+        var res = await fetch('/server/reorder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({ order: order })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        sessionStorage.setItem('_flash_msg', '排序已保存');
+        sessionStorage.setItem('_flash_type', 'success');
+        closeSortModal();
+        window.location.reload();
+    } catch (e) {
+        showToast('排序保存失败', 'error');
+    }
+}
+
+(function() {
+    var msg = sessionStorage.getItem('_flash_msg');
+    if (msg) {
+        var type = sessionStorage.getItem('_flash_type') || 'success';
+        sessionStorage.removeItem('_flash_msg');
+        sessionStorage.removeItem('_flash_type');
+        showToast(msg, type);
+    }
+})();
 </script>
 </body>
 </html>

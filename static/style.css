@@ -1395,29 +1395,68 @@ body.dark-mode .alerts-bell {
 .server-row:hover {
     background: #fafcff;
 }
-.drag-handle {
-    cursor: grab;
-    text-align: center;
-    color: #b0b8d0;
-    font-size: 16px;
-    user-select: none;
-    width: 30px;
+/* ---- Sort Modal List ---- */
+.sort-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #e6e8f3;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #fbfcff;
 }
-.drag-handle:active {
-    cursor: grabbing;
+.sort-item .sort-order {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #6c8dff;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
-.sortable-ghost {
-    opacity: 0.4;
-    background: #e8ecf8 !important;
+.sort-item .sort-name {
+    flex: 1;
+    font-weight: 500;
+    font-size: 14px;
 }
-.sortable-chosen {
-    background: #f0f3fb !important;
-    box-shadow: 0 4px 16px rgba(42,46,91,0.12);
+.sort-item .sort-arrows {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.sort-item .sort-arrows button {
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+/* Dark mode */
+body.dark-mode .sort-item {
+    background: var(--dm-surface);
+    border-color: var(--dm-border);
+}
+body.dark-mode .sort-item .sort-name {
+    color: var(--dm-text);
 }
 .server-row .server-name-cell {
     font-weight: 600;
     color: #2a2e5b;
     font-size: 14px;
+}
+.server-id-cell {
+    font-size: 12px;
+    font-weight: 500;
+    color: #9ba0b8;
+    font-family: Menlo, Consolas, monospace;
+    text-align: center;
+    width: 40px;
+}
+body.dark-mode .server-id-cell {
+    color: #6b6f8a;
 }
 .server-row .server-addr-cell {
     font-family: Menlo, Consolas, monospace;
@@ -1451,13 +1490,13 @@ body.dark-mode .alerts-bell {
     padding: 0 10px 14px 10px !important;
     border-bottom: 1px solid #eef1f7;
 }
-.chart-row .server-chart-box {
+.chart-section .server-chart-box {
     background: #fbfcff;
     border: 1px solid #e6e8f3;
     border-radius: 8px;
     padding: 12px;
 }
-.chart-row .server-chart-header {
+.chart-section .server-chart-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1620,17 +1659,8 @@ body.dark-mode .server-row .server-addr-cell {
 body.dark-mode .drag-handle {
     color: #5a5a7a;
 }
-body.dark-mode .sortable-ghost {
-    background: var(--dm-surface-hover) !important;
-}
-body.dark-mode .sortable-chosen {
-    background: var(--dm-surface-hover) !important;
-}
-body.dark-mode .chart-row .server-chart-box {
+body.dark-mode .chart-section .server-chart-box {
     background: var(--dm-surface);
-    border-color: var(--dm-border);
-}
-body.dark-mode .chart-row td {
     border-color: var(--dm-border);
 }
 
@@ -1866,4 +1896,59 @@ body.dark-mode .mk-output {
         opacity: 0;
         transform: translateY(-20px);
     }
+}
+
+/* ---- Toggle Switch ---- */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #c4c8d8;
+    border-radius: 12px;
+    transition: background 0.2s ease;
+}
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.toggle-switch input:checked + .toggle-slider {
+    background: #6c8dff;
+}
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+}
+.toggle-switch input:disabled + .toggle-slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Dark mode: toggle switch */
+body.dark-mode .toggle-slider {
+    background: #4a4e6b;
+}
+body.dark-mode .toggle-switch input:checked + .toggle-slider {
+    background: #6c8dff;
 }

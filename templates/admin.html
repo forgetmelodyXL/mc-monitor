@@ -29,7 +29,7 @@
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline">公共主页</a>
             <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ current_username }} · 管理员 ▾</button>
+                <button class="user-dropdown-btn user-tag">{{ current_username }} · {{ role_label }} ▾</button>
                 <div class="user-dropdown-menu">
                     <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
@@ -179,7 +179,7 @@
                         <p class="setting-desc">{% if email_enabled %}已开启 - 用户可接收邮件告警{% else %}已关闭 - 所有邮件推送停止{% endif %}</p>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" name="email_enabled" {% if email_enabled %}checked{% endif %}>
+                        <input type="checkbox" name="email_enabled" {% if email_enabled %}checked{% endif %} onchange="saveEmailToggle(this, 'email_enabled')">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -192,7 +192,7 @@
                         <p class="setting-desc">{% if not email_enabled %}请先开启邮件功能{% elif registration_email_enabled %}已开启 - 新用户注册后收到欢迎邮件{% else %}已关闭 - 新用户注册后不发送邮件{% endif %}</p>
                     </div>
                     <label class="toggle-switch">
-                        <input type="checkbox" name="registration_email_enabled" {% if registration_email_enabled %}checked{% endif %} {% if not email_enabled %}disabled{% endif %}>
+                        <input type="checkbox" name="registration_email_enabled" {% if registration_email_enabled %}checked{% endif %} {% if not email_enabled %}disabled{% endif %} onchange="saveEmailToggle(this, 'registration_email_enabled')">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -223,8 +223,8 @@
                     <input type="text" name="smtp_user" value="{{ smtp_user }}" placeholder="user@example.com">
                 </div>
                 <div class="form-group">
-                    <label>SMTP 密码{% if smtp_pass_set %}（已设置）{% endif %}</label>
-                    <input type="password" name="smtp_password" placeholder="{% if smtp_pass_set %}留空表示不修改{% else %}授权码/密码{% endif %}">
+                    <label>SMTP 密码</label>
+                    <input type="text" name="smtp_password" value="{{ smtp_password }}" placeholder="授权码/密码">
                 </div>
             </div>
 
@@ -239,12 +239,12 @@
                 </div>
             </div>
 
-            <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
-                <input type="email" name="test_email" placeholder="测试收件邮箱" style="padding: 8px 12px; border: 1px solid #d0d5e8; border-radius: 8px; font-size: 13px; width: 220px;">
-                <button type="submit" formaction="{{ url_for('admin_email_settings') }}" name="action" value="test" class="btn btn-outline btn-sm">发送测试</button>
-            </div>
             <div class="form-group form-group-action" style="justify-content: flex-end; margin-top: 12px;">
                 <button type="submit" class="btn btn-primary">保存配置</button>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 16px;">
+                <input type="email" name="test_email" placeholder="测试收件邮箱" style="padding: 8px 12px; border: 1px solid #d0d5e8; border-radius: 8px; font-size: 13px; width: 220px;">
+                <button type="submit" formaction="{{ url_for('admin_email_settings') }}" name="action" value="test" class="btn btn-outline btn-sm">发送测试</button>
             </div>
         </form>
 
@@ -316,23 +316,8 @@
                             {% endif %}
 
                             <!-- 角色管理（不能操作超级管理员） -->
-                            {% if u.role != 'super_admin' and session.get('role') == 'super_admin' %}
-                            <form method="POST" action="{{ url_for('admin_set_role', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
-                                {{ csrf_input() }}
-                                <select name="role" style="padding: 4px;">
-                                    <option value="user" {% if u.role == 'user' %}selected{% endif %}>普通用户</option>
-                                    <option value="moderator" {% if u.role == 'moderator' %}selected{% endif %}>协管员</option>
-                                    <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>管理员</option>
-                                </select>
-                                <button type="submit" class="btn btn-sm">设置角色</button>
-                            </form>
-                            {% elif u.role != 'super_admin' %}
-                            <form method="POST" action="{{ url_for('admin_toggle_admin', user_id=u.id) }}" class="inline-form" style="margin-top: 4px;">
-                                {{ csrf_input() }}
-                                <button type="submit" class="btn btn-sm">
-                                    {% if u.is_admin %}降为普通用户{% else %}升级为管理员{% endif %}
-                                </button>
-                            </form>
+                            {% if u.role != 'super_admin' %}
+                            <button type="button" class="btn btn-sm" onclick="openRoleModal({{ u.id }}, '{{ u.username }}', '{{ u.role }}')">设置角色</button>
                             {% endif %}
 
                             <!-- 删除用户（不能删除超级管理员和自己） -->
@@ -413,6 +398,30 @@
             </table>
         </div>
     </section>
+<!-- 角色设置弹窗 -->
+<div id="roleModal" class="modal-overlay" style="display: none;" onclick="if(event.target===this) closeRoleModal()">
+    <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+            <h3>设置用户角色</h3>
+            <button type="button" class="modal-close" onclick="closeRoleModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin: 0 0 12px 0; color: #6b6f8a;">用户：<strong id="roleModalUsername"></strong></p>
+            <div class="form-group">
+                <label>选择角色</label>
+                <select id="roleModalSelect" style="width: 100%; padding: 10px 12px; border: 1px solid #d7dbe8; border-radius: 8px; font-size: 14px; outline: none; background: #fafbff;">
+                    <option value="user">普通用户</option>
+                    <option value="moderator">协管员</option>
+                    <option value="admin">管理员</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeRoleModal()">取消</button>
+            <button type="button" class="btn btn-primary" onclick="submitRoleChange()">确认</button>
+        </div>
+    </div>
+</div>
 </main>
 <script>
 (function () {
@@ -478,6 +487,137 @@
         f.style.display = 'none';
     });
 })();
+</script>
+<script>
+let roleModalUserId = null;
+
+function openRoleModal(userId, username, currentRole) {
+    roleModalUserId = userId;
+    document.getElementById('roleModalUsername').textContent = username;
+    document.getElementById('roleModalSelect').value = currentRole;
+    document.getElementById('roleModal').style.display = 'flex';
+}
+
+function closeRoleModal() {
+    document.getElementById('roleModal').style.display = 'none';
+    roleModalUserId = null;
+}
+
+function submitRoleChange() {
+    const newRole = document.getElementById('roleModalSelect').value;
+    const csrfToken = document.querySelector('input[name="_csrf_token"]').value;
+    
+    fetch('/admin/users/' + roleModalUserId + '/set-role', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: 'role=' + encodeURIComponent(newRole) + '&_csrf_token=' + encodeURIComponent(csrfToken)
+    })
+    .then(function(response) {
+        return response.json().then(function(data) {
+            if (response.ok) {
+                sessionStorage.setItem('_flash_msg', data.message || '角色修改成功');
+                sessionStorage.setItem('_flash_type', 'success');
+                closeRoleModal();
+                window.location.reload();
+            } else {
+                alert(data.message || '角色修改失败，请重试');
+            }
+        });
+    })
+    .catch(function() {
+        alert('网络错误，请重试');
+    });
+}
+
+// 页面加载时检查 sessionStorage 中的待显示消息
+(function() {
+    var msg = sessionStorage.getItem('_flash_msg');
+    if (msg) {
+        var type = sessionStorage.getItem('_flash_type') || 'success';
+        sessionStorage.removeItem('_flash_msg');
+        sessionStorage.removeItem('_flash_type');
+        var c = document.getElementById('toastContainer');
+        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+        var t = document.createElement('div');
+        t.className = 'toast toast-' + type;
+        var icons = { success: '✓', error: '✗', info: 'ℹ' };
+        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+        c.appendChild(t);
+        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
+    }
+})();
+</script>
+<script>
+function saveEmailToggle(checkbox, field) {
+    var value = checkbox.checked ? '1' : '0';
+    var csrfToken = document.querySelector('input[name="_csrf_token"]').value;
+    
+    fetch('/admin/settings/email/toggle', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: 'field=' + encodeURIComponent(field) + '&value=' + encodeURIComponent(value) + '&_csrf_token=' + encodeURIComponent(csrfToken)
+    })
+    .then(function(response) {
+        return response.json().then(function(data) {
+            if (response.ok) {
+                // Show toast
+                var c = document.getElementById('toastContainer');
+                if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
+                var t = document.createElement('div');
+                t.className = 'toast toast-' + (data.success ? 'success' : 'error');
+                var icons = { success: '✓', error: '✗', info: 'ℹ' };
+                t.innerHTML = '<span class="toast-icon">' + (icons[data.success ? 'success' : 'error']) + '</span><span class="toast-msg">' + data.message + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+                c.appendChild(t);
+                setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
+                
+                if (data.success) {
+                    // Update the description text
+                    if (field === 'email_enabled') {
+                        var desc = document.querySelector('.setting-card .setting-desc');
+                        if (desc) {
+                            desc.textContent = value === '1' ? '已开启 - 用户可接收邮件告警' : '已关闭 - 所有邮件推送停止';
+                        }
+                        // Update registration email toggle disabled state and its description
+                        var regToggle = document.querySelector('input[name="registration_email_enabled"]');
+                        if (regToggle) {
+                            regToggle.disabled = value === '0';
+                        }
+                        var regDesc = document.querySelectorAll('.setting-card .setting-desc')[1];
+                        if (regDesc) {
+                            if (value === '0') {
+                                regDesc.textContent = '请先开启邮件功能';
+                            } else {
+                                var regChecked = regToggle ? regToggle.checked : false;
+                                regDesc.textContent = regChecked ? '已开启 - 新用户注册后收到欢迎邮件' : '已关闭 - 新用户注册后不发送邮件';
+                            }
+                        }
+                    } else if (field === 'registration_email_enabled') {
+                        var regDesc2 = document.querySelectorAll('.setting-card .setting-desc')[1];
+                        if (regDesc2) {
+                            regDesc2.textContent = value === '1' ? '已开启 - 新用户注册后收到欢迎邮件' : '已关闭 - 新用户注册后不发送邮件';
+                        }
+                    }
+                } else {
+                    // Revert checkbox on error
+                    checkbox.checked = !(value === '1');
+                }
+            } else {
+                checkbox.checked = !(value === '1');
+                alert(data.message || '操作失败');
+            }
+        });
+    })
+    .catch(function() {
+        checkbox.checked = !(value === '1');
+        alert('网络错误，请重试');
+    });
+}
 </script>
 </body>
 </html>

@@ -162,7 +162,7 @@
             <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
             <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
             <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ username }} ▾</button>
+                <button class="user-dropdown-btn user-tag">{{ username }} · {{ role_label }} ▾</button>
                 <div class="user-dropdown-menu">
                     <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
                     <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
@@ -250,10 +250,13 @@
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label>
-                                    <input type="checkbox" name="email_alert_enabled" {% if user.email_alert_enabled %}checked{% endif %}>
-                                    &nbsp;开启邮件告警
-                                </label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="email_alert_enabled" {% if user.email_alert_enabled %}checked{% endif %}>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span>开启邮件告警</span>
+                                </div>
                                 <p class="hint" style="margin: 4px 0 0 0;">服务器上下线时自动发送邮件通知</p>
                             </div>
                             <div class="form-group">
