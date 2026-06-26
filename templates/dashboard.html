@@ -787,19 +787,20 @@
                         body: JSON.stringify({ signal: action })
                     });
                 }
-                let data;
-                try { data = await res.json(); } catch { data = { raw: res.statusText }; }
-                let output = '[' + action.toUpperCase() + '] HTTP ' + res.status;
-                if (data && data.raw) output += ' ' + data.raw;
-                if (res.ok) {
-                    output += '\n✅ 发送成功';
-                    if (action === 'resources' && data && typeof data === 'object') {
-                        output += '\n' + JSON.stringify(data, null, 2);
+                let output;
+                if (action === 'resources') {
+                    let data;
+                    try { data = await res.json(); } catch { data = { raw: res.statusText }; }
+                    output = '[RESOURCES] HTTP ' + res.status;
+                    if (data && data.raw) output += ' ' + data.raw;
+                    if (res.ok) {
+                        output += '\n✅ 发送成功';
+                        if (data && typeof data === 'object') output += '\n' + JSON.stringify(data, null, 2);
+                    } else {
+                        if (data && data.errors) output += '\n❌ ' + JSON.stringify(data.errors);
                     }
-                    const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
                 } else {
-                    if (data && data.errors) output += '\n❌ ' + JSON.stringify(data.errors);
-                    const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
+                    output = '[' + action.toUpperCase() + '] ' + (res.ok ? '✅ 发送成功' : '❌ 发送失败');
                 }
                 writeMkOutput(output);
             } catch (e) {
