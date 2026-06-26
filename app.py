@@ -62,6 +62,12 @@ def _count_chinese_chars(name):
     """Count the number of Chinese characters in a string."""
     return len(re.findall(r'[\u4e00-\u9fff]', name))
 
+
+def _name_display_width(name):
+    """Calculate display width where 1 Chinese char = 2, 1 ASCII char = 1."""
+    chinese = _count_chinese_chars(name)
+    return chinese * 2 + (len(name) - chinese)
+
 import db as db_module
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2250,8 +2256,9 @@ def server_add():
         return redirect(url_for("dashboard"))
 
     chinese_count = _count_chinese_chars(name)
-    if len(name) < 4 or len(name) > 16:
-        flash("服务器名称长度必须在 4-16 个字符之间", "error")
+    name_width = _name_display_width(name)
+    if name_width < 4 or name_width > 16:
+        flash("服务器名称长度必须在 4-16 个字符宽度之间（1个中文=2个字符宽度）", "error")
         return redirect(url_for("dashboard"))
     if chinese_count < 2:
         flash("服务器名称至少需要 2 个中文字符", "error")
@@ -2364,8 +2371,9 @@ def server_edit(server_id):
         return redirect(url_for("dashboard"))
 
     chinese_count = _count_chinese_chars(name)
-    if len(name) < 4 or len(name) > 16:
-        flash("服务器名称长度必须在 4-16 个字符之间", "error")
+    name_width = _name_display_width(name)
+    if name_width < 4 or name_width > 16:
+        flash("服务器名称长度必须在 4-16 个字符宽度之间（1个中文=2个字符宽度）", "error")
         return redirect(url_for("dashboard"))
     if chinese_count < 2:
         flash("服务器名称至少需要 2 个中文字符", "error")
