@@ -808,17 +808,14 @@
         const btn = this.querySelector('button');
         btn.disabled = true;
         const oldText = btn.textContent;
-        btn.textContent = '⏳ 执行中…';
+        btn.textContent = '⏳ 发送中…';
         try {
             const res = await fetch(API_MINEKUAI_CMD(currentMkServerId), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
                 body: JSON.stringify({ command: cmd })
             });
-            const data = await res.json();
-            writeMkOutput(
-                '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
-                JSON.stringify(data, null, 2));
+            writeMkOutput('[COMMAND] ' + cmd + ' ' + (res.ok ? '✅ 发送成功' : '❌ 发送失败'));
             mkCmdInput.value = '';
         } catch (e) {
             writeMkOutput('[COMMAND] 失败: ' + e.message);
