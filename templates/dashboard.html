@@ -103,7 +103,7 @@
                     <input type="text" name="name" value="{{ g.name }}" maxlength="32" style="padding: 3px 6px; border: 1px solid #c0c6e0; border-radius: 4px; font-size: 12px; width: 100px;">
                     <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #4caf50; color: white;">改</button>
                 </form>
-                <form method="POST" action="{{ url_for('group_delete', group_id=g.id) }}" onsubmit="return confirm('确定删除分组 {{ g.name }}？服务器将移至未分组。');" style="display: inline;">
+                <form method="POST" action="{{ url_for('group_delete', group_id=g.id) }}" onsubmit="return showConfirm('确定删除分组「{{ g.name }}」？\n其中的服务器将移至未分组。', this);" style="display: inline;">
                     {{ csrf_input() }}
                     <button type="submit" class="btn btn-sm" style="padding: 2px 6px; font-size: 11px; background: #e44; color: white;">删</button>
                 </form>
@@ -300,7 +300,7 @@
                                     👥 玩家
                                 </button>
                                 <form method="POST" action="{{ url_for('server_delete', server_id=s.id) }}"
-                                      onsubmit="return confirm('确定删除该服务器？');">
+                                      onsubmit="return showConfirm('确定删除服务器「{{ s.name }}」？\n此操作不可恢复。', this);">
                                     {{ csrf_input() }}
                                     <button type="submit" class="btn btn-sm btn-danger">删除</button>
                                 </form>
@@ -1486,6 +1486,51 @@ function getCsrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? meta.getAttribute('content') : '';
 }
+</script>
+
+<!-- 删除确认弹窗 -->
+<div class="modal-overlay" id="confirmOverlay" style="display:none;">
+    <div class="modal-content" style="max-width:400px;">
+        <div class="modal-header" style="border-bottom-color:#fde8e8; background:#fff5f5;">
+            <h3>⚠️ 确认删除</h3>
+            <button type="button" class="modal-close" onclick="closeConfirm()">✕</button>
+        </div>
+        <div class="modal-body" style="text-align:center; padding:24px 20px;">
+            <p id="confirmMsg" style="margin:0; font-size:14px; color:#555; line-height:1.6;"></p>
+        </div>
+        <div class="modal-footer" style="justify-content:center; gap:12px;">
+            <button type="button" class="btn btn-sm" onclick="closeConfirm()" style="background:#eef0f7; color:#2a2e5b;">取消</button>
+            <button type="button" class="btn btn-sm btn-danger" id="confirmOkBtn" onclick="doConfirm()">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var _confirmTargetForm = null;
+
+function showConfirm(msg, form) {
+    _confirmTargetForm = form;
+    document.getElementById('confirmMsg').textContent = msg;
+    document.getElementById('confirmOverlay').style.display = 'flex';
+    return false;
+}
+
+function closeConfirm() {
+    document.getElementById('confirmOverlay').style.display = 'none';
+    _confirmTargetForm = null;
+}
+
+function doConfirm() {
+    if (_confirmTargetForm) {
+        _confirmTargetForm.submit();
+    }
+    closeConfirm();
+}
+
+// 点击遮罩关闭
+document.getElementById('confirmOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeConfirm();
+});
 </script>
 </body>
 </html>

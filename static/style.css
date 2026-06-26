@@ -1676,6 +1676,14 @@ body.dark-mode .modal-footer .btn-outline {
 body.dark-mode .modal-footer .btn-outline:hover {
     background: rgba(255,255,255,0.12);
 }
+/* Dark mode: confirm dialog */
+body.dark-mode #confirmOverlay .modal-header {
+    border-color: rgba(255,100,100,0.15);
+    background: rgba(255,80,80,0.08);
+}
+body.dark-mode #confirmOverlay .modal-body p {
+    color: var(--dm-text-muted);
+}
 body.dark-mode .mk-status-label {
     color: var(--dm-text-muted);
 }
