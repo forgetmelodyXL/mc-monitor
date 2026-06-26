@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ session.get('_csrf_token', '') }}">
     <title>仪表盘 - MC 服务器监控</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -551,6 +552,7 @@
                         btn.title = isPub ? '已公开 · 点击设为私有' : '已私有 · 点击设为公开';
                     }
                 }
+                showToast('可见性设置已更新', 'success');
             } catch (e) {
                 if (btn) btn.textContent = '⚠';
                 form.submit();
@@ -654,6 +656,7 @@
                 row.dataset.showPlayers = data.show_players ? '1' : '0';
             }
             renderShowPlayersToggleBtn(data.show_players ? '1' : '0');
+            showToast('显示玩家设置已更新', 'success');
         } catch (e) {
             // 如果 AJAX 失败，回退到普通表单提交
             this.submit();
@@ -748,8 +751,10 @@
             mkInstanceId.value = instanceId;
             mkStatusLabel.textContent = instanceId ? ('已绑定实例: ' + instanceId) : '尚未绑定实例 ID';
             appendMkOutput('[实例绑定] ' + (data.message || '成功'));
+            showToast(instanceId ? '实例绑定成功' : '已清除实例绑定', 'success');
         } catch (e) {
             appendMkOutput('[实例绑定] 失败: ' + e.message);
+            showToast('实例绑定失败: ' + e.message, 'error');
         } finally {
             if (mkBindBtn) { mkBindBtn.disabled = false; mkBindBtn.textContent = '保存'; }
         }
@@ -783,8 +788,12 @@
                     if (action === 'resources' && data && typeof data === 'object') {
                         output += '\n' + JSON.stringify(data, null, 2);
                     }
+                    const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
+                    showToast((actionNames[action] || action) + '指令发送成功', 'success');
                 } else {
                     if (data && data.errors) output += '\n❌ ' + JSON.stringify(data.errors);
+                    const actionNames = { start: '启动', stop: '停止', restart: '重启', kill: '强制关闭', resources: '资源查询' };
+                    showToast((actionNames[action] || action) + '指令发送失败', 'error');
                 }
                 writeMkOutput(output);
             } catch (e) {
@@ -816,8 +825,14 @@
                 '[COMMAND] ' + cmd + ' -> HTTP ' + res.status + '\n' +
                 JSON.stringify(data, null, 2));
             mkCmdInput.value = '';
+            if (res.ok) {
+                showToast('命令发送成功', 'success');
+            } else {
+                showToast('命令发送失败', 'error');
+            }
         } catch (e) {
             writeMkOutput('[COMMAND] 失败: ' + e.message);
+            showToast('命令发送失败: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = oldText;
@@ -1260,11 +1275,17 @@
                     btn.addEventListener('click', async function (e) {
                         e.stopPropagation();
                         const id = parseInt(this.dataset.id, 10);
-                        await fetch('/api/alerts/acknowledge', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-                            body: JSON.stringify({ alert_ids: [id] })
-                        });
+                        try {
+                            const res = await fetch('/api/alerts/acknowledge', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                                body: JSON.stringify({ alert_ids: [id] })
+                            });
+                            if (res.ok) showToast('告警已确认', 'success');
+                            else showToast('确认失败', 'error');
+                        } catch (e) {
+                            showToast('确认失败: ' + e.message, 'error');
+                        }
                         loadAlerts();
                     });
                 });
@@ -1272,11 +1293,17 @@
                 alertsList.querySelectorAll('.alert-item').forEach(item => {
                     item.addEventListener('click', async function () {
                         const id = parseInt(this.dataset.id, 10);
-                        await fetch('/api/alerts/acknowledge', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-                            body: JSON.stringify({ alert_ids: [id] })
-                        });
+                        try {
+                            const res = await fetch('/api/alerts/acknowledge', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                                body: JSON.stringify({ alert_ids: [id] })
+                            });
+                            if (res.ok) showToast('告警已确认', 'success');
+                            else showToast('确认失败', 'error');
+                        } catch (e) {
+                            showToast('确认失败: ' + e.message, 'error');
+                        }
                         loadAlerts();
                     });
                 });
@@ -1300,11 +1327,17 @@
         });
 
         ackAllBtn.addEventListener('click', async function () {
-            await fetch('/api/alerts/acknowledge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-                body: JSON.stringify({})
-            });
+            try {
+                const res = await fetch('/api/alerts/acknowledge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+                    body: JSON.stringify({})
+                });
+                if (res.ok) showToast('已全部确认', 'success');
+                else showToast('确认失败', 'error');
+            } catch (e) {
+                showToast('确认失败: ' + e.message, 'error');
+            }
             badge.classList.add('hidden');
             bell.style.borderColor = '';
             loadAlerts();
@@ -1385,8 +1418,10 @@
                         body: JSON.stringify({ order: order })
                     });
                     if (!res.ok) throw new Error('HTTP ' + res.status);
+                    showToast('排序已保存', 'success');
                 } catch (e) {
                     console.error('排序保存失败:', e);
+                    showToast('排序保存失败', 'error');
                 }
             }
         });
