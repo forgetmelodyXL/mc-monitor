@@ -776,10 +776,17 @@
                 }
                 let data;
                 try { data = await res.json(); } catch { data = { raw: res.statusText }; }
-                writeMkOutput(
-                    '[' + action.toUpperCase() + '] HTTP ' + res.status +
-                    (data && data.raw ? ' ' + data.raw : '') +
-                    (res.ok ? '\n✅ 发送成功' : (data && data.errors ? '\n❌ ' + JSON.stringify(data.errors) : '')));
+                let output = '[' + action.toUpperCase() + '] HTTP ' + res.status;
+                if (data && data.raw) output += ' ' + data.raw;
+                if (res.ok) {
+                    output += '\n✅ 发送成功';
+                    if (action === 'resources' && data && typeof data === 'object') {
+                        output += '\n' + JSON.stringify(data, null, 2);
+                    }
+                } else {
+                    if (data && data.errors) output += '\n❌ ' + JSON.stringify(data.errors);
+                }
+                writeMkOutput(output);
             } catch (e) {
                 writeMkOutput('[' + action.toUpperCase() + '] 失败: ' + e.message);
             } finally {
