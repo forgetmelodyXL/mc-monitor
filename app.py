@@ -165,7 +165,14 @@ def _audit(action: str, detail: str = "", user_id=None, username=None):
 # 数据库（委托给 db 模块，支持 SQLite / PostgreSQL / MySQL）
 # ============================================================
 def get_db():
-    return db_module.get_db()
+    db = db_module.get_db()
+    try:
+        if g and not getattr(g, "_schema_ensured", False):
+            _ensure_schema(db)
+            g._schema_ensured = True
+    except RuntimeError:
+        _ensure_schema(db)
+    return db
 
 
 @app.teardown_appcontext

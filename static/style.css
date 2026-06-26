@@ -1,5 +1,139 @@
 * { box-sizing: border-box; }
 
+/* ---- 全局统一输入框样式 ---- */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+input[type="search"],
+input[type="date"],
+input[type="time"],
+select,
+textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d7dbe8;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    color: #2d2d2d;
+    background: #fafbff;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+input[type="text"]:hover,
+input[type="email"]:hover,
+input[type="password"]:hover,
+input[type="number"]:hover,
+input[type="tel"]:hover,
+input[type="url"]:hover,
+input[type="search"]:hover,
+input[type="date"]:hover,
+input[type="time"]:hover,
+select:hover,
+textarea:hover {
+    border-color: #b8c0dc;
+    background: #fff;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="tel"]:focus,
+input[type="url"]:focus,
+input[type="search"]:focus,
+input[type="date"]:focus,
+input[type="time"]:focus,
+select:focus,
+textarea:focus {
+    border-color: #6c8dff;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(108, 141, 255, 0.18);
+}
+
+input[type="text"]:disabled,
+input[type="email"]:disabled,
+input[type="password"]:disabled,
+input[type="number"]:disabled,
+input[type="tel"]:disabled,
+input[type="url"]:disabled,
+input[type="search"]:disabled,
+select:disabled,
+textarea:disabled {
+    background: #f0f2f7;
+    color: #9ba1b8;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Select 下拉框自定义箭头 */
+select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b6f8a' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+}
+
+/* Textarea 样式 */
+textarea {
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.5;
+}
+
+/* Number 输入框去除上下箭头 */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* 浏览器自动填充样式修复 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #2d2d2d;
+    -webkit-box-shadow: 0 0 0px 1000px #fafbff inset;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 复选框和单选框统一样式 */
+input[type="checkbox"],
+input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #4b5bb0;
+    cursor: pointer;
+}
+
+/* 小尺寸输入框 */
+.input-sm {
+    padding: 6px 10px !important;
+    font-size: 13px !important;
+    border-radius: 6px !important;
+}
+
+/* 行内输入框 */
+.inline-form input[type="text"],
+.inline-form input[type="number"],
+.inline-form select {
+    width: auto;
+    padding: 5px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+
 html, body {
     margin: 0;
     padding: 0;
@@ -800,6 +934,77 @@ body.dark-mode {
 
 body.dark-mode a { color: var(--dm-primary); }
 body.dark-mode a:hover { color: var(--dm-primary-hover); }
+
+/* Dark mode - 全局输入框样式 */
+body.dark-mode input[type="text"],
+body.dark-mode input[type="email"],
+body.dark-mode input[type="password"],
+body.dark-mode input[type="number"],
+body.dark-mode input[type="tel"],
+body.dark-mode input[type="url"],
+body.dark-mode input[type="search"],
+body.dark-mode input[type="date"],
+body.dark-mode input[type="time"],
+body.dark-mode select,
+body.dark-mode textarea {
+    background: var(--dm-input-bg);
+    border-color: var(--dm-input-border);
+    color: var(--dm-text);
+}
+
+body.dark-mode input[type="text"]:hover,
+body.dark-mode input[type="email"]:hover,
+body.dark-mode input[type="password"]:hover,
+body.dark-mode input[type="number"]:hover,
+body.dark-mode input[type="tel"]:hover,
+body.dark-mode input[type="url"]:hover,
+body.dark-mode input[type="search"]:hover,
+body.dark-mode input[type="date"]:hover,
+body.dark-mode input[type="time"]:hover,
+body.dark-mode select:hover,
+body.dark-mode textarea:hover {
+    border-color: #4a4a7a;
+}
+
+body.dark-mode input[type="text"]:focus,
+body.dark-mode input[type="email"]:focus,
+body.dark-mode input[type="password"]:focus,
+body.dark-mode input[type="number"]:focus,
+body.dark-mode input[type="tel"]:focus,
+body.dark-mode input[type="url"]:focus,
+body.dark-mode input[type="search"]:focus,
+body.dark-mode input[type="date"]:focus,
+body.dark-mode input[type="time"]:focus,
+body.dark-mode select:focus,
+body.dark-mode textarea:focus {
+    border-color: var(--dm-primary);
+    background: var(--dm-input-bg);
+    box-shadow: 0 0 0 3px rgba(108, 141, 255, 0.2);
+}
+
+body.dark-mode input[type="text"]:disabled,
+body.dark-mode input[type="email"]:disabled,
+body.dark-mode input[type="password"]:disabled,
+body.dark-mode input[type="number"]:disabled,
+body.dark-mode input[type="tel"]:disabled,
+body.dark-mode input[type="url"]:disabled,
+body.dark-mode select:disabled,
+body.dark-mode textarea:disabled {
+    background: #1a1a2a;
+    color: #6a6a8a;
+    opacity: 0.6;
+}
+
+body.dark-mode select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8fa6' d='M6 8.5L1.5 4h9z'/%3E%3C/svg%3E");
+}
+
+body.dark-mode input:-webkit-autofill,
+body.dark-mode input:-webkit-autofill:hover,
+body.dark-mode input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--dm-text);
+    -webkit-box-shadow: 0 0 0px 1000px var(--dm-input-bg) inset;
+}
 
 /* Auth pages dark mode */
 body.dark-mode .auth-card {
