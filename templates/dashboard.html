@@ -13,9 +13,19 @@
 {% from "base.html" import csrf_input with context %}
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% if messages %}
-<div style="display:none">
+<div class="flash-banner-container">
 {% for category, message in messages %}
-<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
+<div class="flash-banner flash-banner-{{ category }}">
+    <span class="flash-banner-icon">
+        {% if category == 'success' %}✅
+        {% elif category == 'error' %}❌
+        {% elif category == 'warning' %}⚠️
+        {% else %}ℹ️
+        {% endif %}
+    </span>
+    <span class="flash-banner-text">{{ message }}</span>
+    <button type="button" class="flash-banner-close" onclick="this.parentElement.remove()">✕</button>
+</div>
 {% endfor %}
 </div>
 {% endif %}
@@ -560,116 +570,6 @@
             } finally {
                 if (btn) btn.disabled = false;
             }
-        });
-    });
-
-    // ---- 通用 AJAX 表单提交 ----
-    async function submitAjaxForm(form, btn) {
-        const url = form.action;
-        if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-        try {
-            const formData = new FormData(form);
-            const res = await fetch(url, {
-                method: 'POST',
-                body: formData,
-                headers: { 'Accept': 'application/json' }
-            });
-            const data = await res.json();
-            if (res.ok) {
-                showToast(data.message || '操作成功', 'success');
-                refresh(true);
-                return true;
-            } else {
-                showToast(data.message || '操作失败', 'error');
-                return false;
-            }
-        } catch (e) {
-            showToast('操作失败：' + e.message, 'error');
-            return false;
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = form.dataset.originalText || '保存'; }
-        }
-    }
-
-    // 添加服务器表单
-    document.querySelector('.add-server-form')?.addEventListener('submit', async function (ev) {
-        ev.preventDefault();
-        const btn = this.querySelector('button[type="submit"]');
-        const originalText = btn ? btn.textContent : '';
-        if (btn) btn.dataset.originalText = originalText;
-        await submitAjaxForm(this, btn);
-        if (btn) btn.textContent = originalText;
-    });
-
-    // 删除服务器表单
-    document.querySelectorAll('form[action*="/server/"][action*="/delete"]').forEach(form => {
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) btn.dataset.originalText = btn.textContent;
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            if (!confirm('确定删除该服务器？')) return;
-            await submitAjaxForm(this, btn);
-        });
-    });
-
-    // 编辑服务器保存按钮
-    document.getElementById('editSaveBtn')?.addEventListener('click', async function () {
-        const btn = this;
-        const originalText = btn.textContent;
-        btn.dataset.originalText = originalText;
-        const success = await submitAjaxForm(editForm, btn);
-        if (success) closeEditModal();
-        btn.textContent = originalText;
-    });
-
-    // 创建分组表单
-    document.querySelector('form[action="/group/add"]')?.addEventListener('submit', async function (ev) {
-        ev.preventDefault();
-        const btn = this.querySelector('button[type="submit"]');
-        const originalText = btn ? btn.textContent : '';
-        if (btn) btn.dataset.originalText = originalText;
-        await submitAjaxForm(this, btn);
-        if (btn) btn.textContent = originalText;
-    });
-
-    // 分组改名表单
-    document.querySelectorAll('form[action*="/group/"][action*="/rename"]').forEach(form => {
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) btn.dataset.originalText = btn.textContent;
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            await submitAjaxForm(this, btn);
-        });
-    });
-
-    // 删除分组表单
-    document.querySelectorAll('form[action*="/group/"][action*="/delete"]').forEach(form => {
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) btn.dataset.originalText = btn.textContent;
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            if (!confirm(form.dataset.confirmMessage || '确定删除？')) return;
-            await submitAjaxForm(this, btn);
-        });
-    });
-
-    // 服务器切换分组表单
-    document.querySelectorAll('.group-set-form').forEach(form => {
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) btn.dataset.originalText = btn.textContent;
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            await submitAjaxForm(this, btn);
-        });
-    });
-
-    // 麦块 API Key 保存表单
-    document.querySelectorAll('form[action*="/minekuai/bind-key"]').forEach(form => {
-        const btn = form.querySelector('button[type="submit"]');
-        if (btn) btn.dataset.originalText = btn.textContent;
-        form.addEventListener('submit', async function (ev) {
-            ev.preventDefault();
-            await submitAjaxForm(this, btn);
         });
     });
 
@@ -1568,13 +1468,19 @@
         }, 10000);
     });
 
-    // 页面加载时显示 flash 消息为 toast
+    // 页面加载时：顶部提示条自动消失
     (function () {
-        var flashes = document.querySelectorAll('.flash');
-        flashes.forEach(function (f) {
-            var isError = f.classList.contains('flash-error');
-            showToast(f.textContent.trim(), isError ? 'error' : 'success');
-            f.style.display = 'none';
+        var banners = document.querySelectorAll('.flash-banner');
+        banners.forEach(function (banner) {
+            setTimeout(function () {
+                banner.style.opacity = '0';
+                banner.style.transform = 'translateY(-100%)';
+                setTimeout(function () {
+                    if (banner.parentElement) {
+                        banner.remove();
+                    }
+                }, 300);
+            }, 4000);
         });
     })();
 })();
