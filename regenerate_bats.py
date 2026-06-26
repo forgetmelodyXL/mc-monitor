@@ -54,7 +54,8 @@ echo.
 
 echo [1/5] Install / update dependencies (Flask + requests + APScheduler + PyInstaller) ...
 python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple --disable-pip-version-check >nul 2>nul
-python -m pip install --disable-pip-version-check -i https://pypi.tuna.tsinghua.edu.cn/simple flask requests APScheduler pyinstaller
+python -m pip install --disable-pip-version-check ^
+    -i https://pypi.tuna.tsinghua.edu.cn/simple flask requests APScheduler pyinstaller
 if errorlevel 1 (
     echo [ERROR] Dependency install failed. Check your network.
     pause

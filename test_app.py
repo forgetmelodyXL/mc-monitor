@@ -11,8 +11,7 @@ if _this_dir not in sys.path:
 # 强制测试模式
 os.environ["MCMONITOR_SECRET_KEY"] = "test-secret-key-for-testing"
 
-import app as app_module
-from app import app, init_db, get_db, hash_password, verify_password, row_get
+from app import app, init_db, get_db, hash_password, verify_password, row_get  # noqa: E402
 
 
 class TestBase(unittest.TestCase):
