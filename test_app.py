@@ -8,8 +8,7 @@ _this_dir = os.path.dirname(os.path.abspath(__file__))
 if _this_dir not in sys.path:
     sys.path.insert(0, _this_dir)
 
-# 强制开发模式，避免测试中尝试连接生产环境
-os.environ["MCMONITOR_ENV"] = "development"
+# 强制测试模式
 os.environ["MCMONITOR_SECRET_KEY"] = "test-secret-key-for-testing"
 
 import app as app_module

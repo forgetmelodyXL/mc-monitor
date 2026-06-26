@@ -81,13 +81,9 @@ DB_PATH = os.path.join(DATA_DIR, "mcmonitor.db")
 TEMPLATE_DIR = os.path.join(RESOURCE_DIR, "templates")
 STATIC_DIR = os.path.join(RESOURCE_DIR, "static")
 
-# PyInstaller 打包检测：frozen 状态下强制生产环境，关闭 debug
+# PyInstaller 打包检测：frozen 状态下强制关闭 debug
 if getattr(sys, "frozen", False):
-    os.environ.setdefault("MCMONITOR_ENV", "production")
     os.environ["MCMONITOR_DEBUG"] = "0"
-
-_ENV = os.environ.get("MCMONITOR_ENV", "development").lower()
-IS_PRODUCTION = _ENV == "production"
 
 app = Flask(
     __name__,
@@ -102,7 +98,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-app.config["PREFERRED_URL_SCHEME"] = "https" if IS_PRODUCTION else "http"
+app.config["PREFERRED_URL_SCHEME"] = "https"
 
 
 def _setup_logging():
@@ -121,12 +117,6 @@ def _setup_logging():
         "%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    # 控制台（非生产环境）
-    if not IS_PRODUCTION:
-        console = logging.StreamHandler(sys.stdout)
-        console.setFormatter(fmt)
-        root.addHandler(console)
 
     # 应用日志（轮转，保留 10 个文件，每个 5MB）
     app_log = logging.handlers.RotatingFileHandler(
@@ -153,15 +143,9 @@ def _setup_logging():
     # 抑制 Flask/Werkzeug 的默认日志，避免重复
     werkzeug_logger = logging.getLogger("werkzeug")
     werkzeug_logger.handlers.clear()
-    if IS_PRODUCTION:
-        werkzeug_logger.setLevel(logging.WARNING)
-    else:
-        access_handler = logging.StreamHandler(sys.stdout)
-        access_handler.setFormatter(access_fmt)
-        werkzeug_logger.addHandler(access_handler)
-        werkzeug_logger.setLevel(logging.INFO)
+    werkzeug_logger.setLevel(logging.WARNING)
 
-    logging.info("Logging initialized: env=%s level=%s", _ENV, log_level)
+    logging.info("Logging initialized: level=%s", log_level)
 
 
 _setup_logging()
@@ -3630,14 +3614,13 @@ if __name__ == "__main__":
     host = os.environ.get("MCMONITOR_HOST", "0.0.0.0")
     port = int(os.environ.get("MCMONITOR_PORT", "5000"))
 
-    if IS_PRODUCTION and not debug_mode:
+    if debug_mode:
+        print("[DEBUG] 热加载模式已开启，代码修改后自动重启")
+        app.run(host=host, port=port, debug=True, use_reloader=True)
+    else:
         try:
             from waitress import serve
             serve(app, host=host, port=port, threads=4)
         except ImportError:
             print("WARNING: waitress not installed, falling back to Flask dev server")
             app.run(host=host, port=port, debug=False, use_reloader=False)
-    else:
-        if debug_mode:
-            print("[DEBUG] 热加载模式已开启，代码修改后自动重启")
-        app.run(host=host, port=port, debug=debug_mode, use_reloader=debug_mode)

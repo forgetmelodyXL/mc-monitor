@@ -227,11 +227,9 @@ docker compose up -d --build
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MCMONITOR_ENV` | `development` | 运行模式：`development` / `production` |
 | `MCMONITOR_SECRET_KEY` | 自动生成 | Session 加密密钥，生产环境建议手动设置 |
 | `MCMONITOR_HOST` | `0.0.0.0` | 监听地址 |
 | `MCMONITOR_PORT` | `5000` | 监听端口 |
-| `MCMONITOR_NOBROWSER` | `0`(开发) / `1`(生产) | 禁止自动打开浏览器 |
 | `MCMONITOR_BOOTSTRAP_PASSWORD` | 空 | 首次启动时创建 admin 管理员的密码 |
 | `MCMONITOR_LOG_LEVEL` | `INFO` | 日志级别：DEBUG / INFO / WARNING / ERROR |
 | `MCMONITOR_LOG_DIR` | 数据目录 | 日志存放目录 |
@@ -260,7 +258,6 @@ After=network.target
 Type=simple
 User=mcmonitor
 WorkingDirectory=/opt/mc-monitor
-Environment="MCMONITOR_ENV=production"
 EnvironmentFile=/opt/mc-monitor/.env
 ExecStart=/usr/bin/python3 main.py
 Restart=always

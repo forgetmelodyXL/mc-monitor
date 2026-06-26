@@ -277,11 +277,9 @@ install_docker_method() {
         BOOTSTRAP_PASSWORD=$(gen_password)
 
         cat > .env <<EOF
-MCMONITOR_ENV=production
 MCMONITOR_SECRET_KEY=${SECRET_KEY}
 MCMONITOR_HOST=0.0.0.0
 MCMONITOR_PORT=5000
-MCMONITOR_NOBROWSER=1
 MCMONITOR_BOOTSTRAP_PASSWORD=${BOOTSTRAP_PASSWORD}
 EOF
     else
@@ -362,11 +360,9 @@ install_python_method() {
         BOOTSTRAP_PASSWORD=$(gen_password)
 
         cat > .env <<EOF
-MCMONITOR_ENV=production
 MCMONITOR_SECRET_KEY=${SECRET_KEY}
 MCMONITOR_HOST=0.0.0.0
 MCMONITOR_PORT=5000
-MCMONITOR_NOBROWSER=1
 MCMONITOR_BOOTSTRAP_PASSWORD=${BOOTSTRAP_PASSWORD}
 EOF
     else
@@ -393,7 +389,6 @@ After=network.target
 Type=simple
 User=${USER}
 WorkingDirectory=${INSTALL_DIR}
-Environment="MCMONITOR_ENV=production"
 EnvironmentFile=${INSTALL_DIR}/.env
 ExecStart=${INSTALL_DIR}/venv/bin/python ${INSTALL_DIR}/main.py
 Restart=always

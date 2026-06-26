@@ -17,10 +17,8 @@ RUN useradd --create-home --shell /bin/bash mcmonitor && \
 
 USER mcmonitor
 
-ENV MCMONITOR_ENV=production
 ENV MCMONITOR_HOST=0.0.0.0
 ENV MCMONITOR_PORT=5000
-ENV MCMONITOR_NOBROWSER=1
 
 EXPOSE 5000
 

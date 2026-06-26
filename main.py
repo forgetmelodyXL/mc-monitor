@@ -1,10 +1,8 @@
 import os
 import sys
-import webbrowser
 
-# PyInstaller 打包检测：frozen 状态下强制生产环境，关闭 debug
+# PyInstaller 打包检测：frozen 状态下强制关闭 debug
 if getattr(sys, "frozen", False):
-    os.environ.setdefault("MCMONITOR_ENV", "production")
     os.environ["MCMONITOR_DEBUG"] = "0"
 
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,13 +68,9 @@ def main():
     if not debug_mode or is_reloader_child:
         app_module._start_scheduler()
 
-    _is_production = os.environ.get("MCMONITOR_ENV", "development").lower() == "production"
-    _nobrowser_default = "1" if _is_production else "0"
     host = os.environ.get("MCMONITOR_HOST", "0.0.0.0")
     port = int(os.environ.get("MCMONITOR_PORT", "5000"))
-    open_browser = os.environ.get("MCMONITOR_NOBROWSER", _nobrowser_default) == "0" and not debug_mode
 
-    # 如果监听 0.0.0.0 或所有网卡，浏览器仍然用 127.0.0.1 本机打开即可
     browser_host = "127.0.0.1" if host in ("0.0.0.0", "::", "0.0.0.0/0") else host
     url = f"http://{browser_host}:{port}"
 
@@ -110,13 +104,6 @@ def main():
         print("[DEBUG] 热加载监控进程启动，等待子进程...")
         print()
 
-    if open_browser:
-        try:
-            if not any(a in sys.argv for a in ("--no-browser", "-n")):
-                webbrowser.open(url, new=2)
-        except Exception:
-            pass
-
     # 交互式命令行只在真正运行服务的进程中启动
     if not debug_mode or is_reloader_child:
         import cli
@@ -127,15 +114,13 @@ def main():
             if is_reloader_child:
                 print("[DEBUG] 热加载模式已开启，代码修改后自动重启")
             app_module.app.run(host=host, port=port, debug=True, use_reloader=True)
-        elif app_module.IS_PRODUCTION:
+        else:
             try:
                 from waitress import serve
                 serve(app_module.app, host=host, port=port, threads=4)
             except ImportError:
                 print("WARNING: waitress not installed, falling back to Flask dev server")
                 app_module.app.run(host=host, port=port, debug=False, use_reloader=False)
-        else:
-            app_module.app.run(host=host, port=port, debug=False, use_reloader=False)
     except KeyboardInterrupt:
         print("\n已停止服务。")
 
