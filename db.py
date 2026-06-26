@@ -18,7 +18,7 @@
 import os
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
 # 类型检测
@@ -328,7 +328,7 @@ def init_db(db_path=None):
     CREATE INDEX IF NOT EXISTS idx_alerts_user_ack ON alerts(user_id, acknowledged, created_at DESC);
     """)
 
-    now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
     for col_sql in (
         "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
         "ALTER TABLE servers ADD COLUMN refresh_interval INTEGER NOT NULL DEFAULT 60",

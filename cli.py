@@ -16,7 +16,7 @@ import sys
 import secrets
 import hashlib
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _ensure_app_context():
@@ -58,7 +58,7 @@ def cmd_reset_password(args):
     db = _db.get_db()
     try:
         existing = db.fetchone("SELECT id, username FROM users WHERE username = ?", ("admin",))
-        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
         if not existing:
             pw_hash = hash_password(new_pass)
             db.execute(
@@ -118,7 +118,7 @@ def cmd_create_user(args):
             return 1
 
         pw_hash = hash_password(password)
-        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
         db.execute(
             "INSERT INTO users (username, password_hash, role, is_admin, created_at) VALUES (?, ?, 'user', 0, ?)",
             (username, pw_hash, now),

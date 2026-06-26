@@ -70,6 +70,7 @@ class TestAuth(TestBase):
             csrf = self._get_csrf(c, "/register")
             resp = c.post("/register", data={
                 "username": "testuser",
+                "email": "test@example.com",
                 "password": "testpass123",
                 "confirm": "testpass123",
                 "_csrf_token": csrf,

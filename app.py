@@ -12,7 +12,7 @@ import re
 import logging
 import logging.handlers
 import concurrent.futures
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import db as db_module
@@ -246,7 +246,7 @@ def _set_schema_version(conn, version):
     conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES ('schema_version', ?, ?)"
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (str(version), datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+        (str(version), datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
     )
 
 
@@ -523,7 +523,7 @@ def get_setting(key: str, default: str = "") -> str:
 def set_setting(key: str, value: str) -> None:
     """写入 settings 表中的开关值"""
     db = get_db()
-    now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
     db.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
@@ -592,13 +592,13 @@ def _check_email_cooldown(user_id: int, server_id: int) -> bool:
         "SELECT email_cooldown FROM users WHERE id = ?", (user_id,)
     ).fetchone()
     cooldown_min = int(row_get(user_row, "email_cooldown", 30))
-    elapsed = (datetime.utcnow() - last).total_seconds() / 60
+    elapsed = (datetime.now(timezone.utc) - last).total_seconds() / 60
     return elapsed < cooldown_min
 
 
 def _set_email_cooldown(user_id: int, server_id: int) -> None:
     """设置冷却时间"""
-    _EMAIL_COOLDOWN[(user_id, server_id)] = datetime.utcnow()
+    _EMAIL_COOLDOWN[(user_id, server_id)] = datetime.now(timezone.utc)
 
 
 def send_alert_email(user_id: int, server_id: int, server_name: str,
@@ -624,7 +624,7 @@ def send_alert_email(user_id: int, server_id: int, server_name: str,
         f"{message}\n"
         f"\n"
         f"服务器: {server_name}\n"
-        f"时间: {datetime.utcnow().isoformat(sep=' ', timespec='seconds')} UTC\n"
+        f"时间: {datetime.now(timezone.utc).isoformat(sep=' ', timespec='seconds')} UTC\n"
         f"\n"
         f"-- MC 服务器监控\n"
     )
@@ -675,7 +675,7 @@ def metrics():
         "SELECT AVG(latency_ms) as avg_ms FROM status_logs WHERE online = 1 AND latency_ms IS NOT NULL"
     )
     avg_latency = round(avg_lat["avg_ms"], 1) if avg_lat and avg_lat["avg_ms"] else 0
-    since = (datetime.utcnow() - timedelta(hours=24)).isoformat(sep=" ", timespec="seconds")
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(sep=" ", timespec="seconds")
     fail_24h = db.fetchone(
         "SELECT COUNT(*) as cnt FROM status_logs WHERE online = 0 AND checked_at >= ?", (since,)
     )
@@ -1416,7 +1416,7 @@ def register():
                 else:
                     db.execute(
                         "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                        (username, email, hash_password(password), datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+                        (username, email, hash_password(password), datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
                     )
                     db.commit()
                     flash("注册成功，请登录", "success")
@@ -2120,7 +2120,7 @@ def server_add():
                 port,
                 protocol,
                 show_players,
-                datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+                datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
             ),
         )
     except sqlite3.OperationalError:
@@ -2132,7 +2132,7 @@ def server_add():
                 name[:64],
                 host[:253],
                 port,
-                datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+                datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
             ),
         )
     db.commit()
@@ -2334,7 +2334,7 @@ def group_add():
     db.execute(
         "INSERT INTO server_groups (user_id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
         (session["user_id"], name[:32], max_order + 1,
-         datetime.utcnow().isoformat(sep=" ", timespec="seconds")),
+         datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")),
     )
     db.commit()
     _audit("group_add", f"created group: {name}")
@@ -2575,7 +2575,7 @@ def api_public_status():
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
             "owner_display": row_get(s, "display_name", "") or _mask_email(row_get(s, "owner_name", "") or ""),
-            "checked_at": datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+            "checked_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
         if online:
@@ -2608,7 +2608,7 @@ def api_public_status():
         "online": total_online,
         "offline": len(results) - total_online,
         "total_players": total_players,
-        "updated_at": datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+        "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
     })
 
 
@@ -2656,7 +2656,7 @@ def api_status():
             "motd": info.get("motd") or "",
             "latency_ms": info.get("latency_ms"),
             "error": info.get("error") or "",
-            "checked_at": datetime.utcnow().isoformat(sep=" ", timespec="seconds"),
+            "checked_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
         }
         results.append(entry)
         try:
@@ -3239,7 +3239,7 @@ def _poll_all_servers():
                     pass
 
         # 批量写入数据库，同时检测状态变化生成告警
-        now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
         alerts_to_insert = []
 
         for r in results:
@@ -3345,12 +3345,12 @@ def _cleanup_old_data():
         # 由于 SQLite 日期格式不一致，先用简单方式：根据 ID 范围估算
         # 更精确的方式：用 checked_at/created_at 字段比较
         # now 未使用，但保留以备将来调试用
-        datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+        datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
 
-        logs_cutoff = (datetime.utcnow() - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
-        alerts_cutoff = (datetime.utcnow() - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")
+        logs_cutoff = (datetime.now(timezone.utc) - timedelta(days=logs_days)).isoformat(sep=" ", timespec="seconds")
+        alerts_cutoff = (datetime.now(timezone.utc) - timedelta(days=alerts_days)).isoformat(sep=" ", timespec="seconds")
         # 未读告警最多 30 天
-        unread_cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat(sep=" ", timespec="seconds")
+        unread_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(sep=" ", timespec="seconds")
 
         # 删除过期日志
         log_cursor = db.execute(
