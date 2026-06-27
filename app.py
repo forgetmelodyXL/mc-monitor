@@ -3707,9 +3707,11 @@ def api_alerts_count():
 @app.route("/alerts")
 @login_required
 def alerts_history():
-    """历史告警页面（支持分页和筛选）"""
+    """历史告警页面（支持分页、类型筛选和时间范围查询）"""
     page = request.args.get("page", "1")
     event_filter = request.args.get("type", "all")
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
     per_page = 30
 
     try:
@@ -3723,10 +3725,20 @@ def alerts_history():
 
     query_where = "WHERE a.user_id = ?"
     params = [session["user_id"]]
+    stats_params = [session["user_id"]]
 
     if event_filter in ("offline", "online"):
         query_where += " AND a.event_type = ?"
         params.append(event_filter)
+
+    if start_date:
+        query_where += " AND a.created_at >= ?"
+        params.append(start_date + " 00:00:00")
+        stats_params.append(start_date + " 00:00:00")
+    if end_date:
+        query_where += " AND a.created_at <= ?"
+        params.append(end_date + " 23:59:59")
+        stats_params.append(end_date + " 23:59:59")
 
     count_row = db.execute(
         "SELECT COUNT(*) AS cnt FROM alerts a " + query_where,
@@ -3750,23 +3762,24 @@ def alerts_history():
         params + [per_page, offset]
     ).fetchall()
 
-    # 统计数据（SQLite 不支持 FILTER，使用 SUM(CASE WHEN)）
+    stats_where = "WHERE a.user_id = ?"
+    if start_date:
+        stats_where += " AND a.created_at >= ?"
+    if end_date:
+        stats_where += " AND a.created_at <= ?"
+
     stats_row = db.execute(
         """SELECT
-           SUM(CASE WHEN a.acknowledged = 0 AND a.event_type = 'offline' THEN 1 ELSE 0 END) AS unread_offline,
-           SUM(CASE WHEN a.acknowledged = 0 AND a.event_type = 'online' THEN 1 ELSE 0 END) AS unread_online,
            SUM(CASE WHEN a.event_type = 'offline' THEN 1 ELSE 0 END) AS total_offline,
            SUM(CASE WHEN a.event_type = 'online' THEN 1 ELSE 0 END) AS total_online
            FROM alerts a
-           WHERE a.user_id = ?""",
-        (session["user_id"],)
+           """ + stats_where,
+        stats_params
     ).fetchone()
 
     stats = {
-        "unread_offline": stats_row["unread_offline"] if stats_row else 0,
-        "unread_online": stats_row["unread_online"] if stats_row else 0,
-        "total_offline": stats_row["total_offline"] if stats_row else 0,
-        "total_online": stats_row["total_online"] if stats_row else 0,
+        "total_offline": stats_row["total_offline"] if stats_row and stats_row["total_offline"] else 0,
+        "total_online": stats_row["total_online"] if stats_row and stats_row["total_online"] else 0,
         "total": total,
     }
 
@@ -3778,6 +3791,8 @@ def alerts_history():
         total=total,
         per_page=per_page,
         event_filter=event_filter,
+        start_date=start_date,
+        end_date=end_date,
         stats=stats,
         username=session.get("username", ""),
         role_label=_get_role_label(),
