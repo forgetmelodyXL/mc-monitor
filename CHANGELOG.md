@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.6.3] - 2026-06-27
+## [1.6.3] - 2026-07-01
 
 ### ✨ 新增
 - **PJAX 无刷新页面加载**：所有页面支持 PJAX 导航，点击链接无整页刷新，顶部进度条动画，浏览器前进/后退正常
