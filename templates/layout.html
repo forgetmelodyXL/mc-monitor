@@ -54,7 +54,6 @@
         </div>
     </div>
 </header>
-{% endif %}
 
 {# ===== Flash 横幅 ===== #}
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -81,11 +80,10 @@
 <div id="toastContainer" class="toast-container"></div>
 
 {# ===== 主内容区 ===== #}
-<main id="pjax-container" {% if not _pjax %}class="container"{% endif %}>
+<main id="pjax-container" class="container">
 {% block content %}{% endblock %}
 </main>
 
-{% if not _pjax %}
 {# ===== 暗色模式切换 ===== #}
 <script>
 (function () {
@@ -185,6 +183,11 @@ if ('serviceWorker' in navigator) {
 
 {# ===== PJAX 无刷新加载 ===== #}
 <script src="{{ url_for('static', filename='pjax.js') }}"></script>
+
+{% else %}
+{# ===== PJAX 模式：只返回标题 + 内容，无外壳 ===== #}
+<title>{{ self.title() }}</title>
+{{ self.content() }}
 {% endif %}
 
 {% block scripts %}{% endblock %}

@@ -72,6 +72,7 @@
         var titleMatch = html.match(/<title>([^<]*)<\/title>/);
         if (titleMatch) {
             document.title = titleMatch[1];
+            html = html.replace(/<title>[^<]*<\/title>/, '');
         }
 
         // 提取 flash 横幅
