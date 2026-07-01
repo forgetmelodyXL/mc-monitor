@@ -1,5 +1,22 @@
 * { box-sizing: border-box; }
 
+/* ---- PJAX 进度条 ---- */
+.pjax-bar {
+    position: fixed; top: 0; left: 0; width: 100%; height: 3px; z-index: 9999;
+    pointer-events: none; opacity: 0; transition: opacity 0.2s;
+}
+.pjax-bar-active { opacity: 1; }
+.pjax-bar-inner {
+    height: 100%; width: 0;
+    background: linear-gradient(90deg, #6c8dff, #a78bfa, #6c8dff);
+    background-size: 200% 100%;
+    animation: pjaxShimmer 1.5s ease-in-out infinite;
+}
+@keyframes pjaxShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: 0 0; }
+}
+
 /* ---- 全局统一输入框样式 ---- */
 input[type="text"],
 input[type="email"],

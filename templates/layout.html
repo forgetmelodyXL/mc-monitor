@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#6c8dff">
+    <meta name="description" content="实时监控 Minecraft 服务器状态，支持掉线告警、历史图表">
+    <meta name="csrf-token" content="{{ session.get('_csrf_token', '') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%231a1d2e'/><text y='320' font-size='280' text-anchor='middle' fill='%236c8dff'>⛏</text></svg>">
+    <title>{% block title %}MC 服务器监控{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="dashboard-body">
+{% from "base.html" import csrf_input with context %}
+
+{% if not _pjax %}
+{# ===== 顶栏 ===== #}
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-icon">⛏</span>
+            <span class="brand-text">MC 服务器监控</span>
+            <span class="brand-version">v{{ app_version }}</span>
+        </div>
+        <div class="topbar-right">
+            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
+            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
+            {% if session.get('user_id') %}
+            <div class="user-dropdown">
+                <button class="user-dropdown-btn user-tag">{{ session.get('username', '') }} · {{ role_label }} ▾</button>
+                <div class="user-dropdown-menu">
+                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
+                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
+                    {% if session.get('is_admin') %}
+                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
+                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
+                    {% endif %}
+                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
+                    <div class="user-dropdown-divider"></div>
+                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
+                        {{ csrf_input() }}
+                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
+                            🚪 注销
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn btn-sm btn-primary">登录</a>
+                <a href="{{ url_for('register') }}" class="btn btn-sm btn-outline">注册</a>
+            {% endif %}
+        </div>
+    </div>
+</header>
+{% endif %}
+
+{# ===== Flash 横幅 ===== #}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-banner-container">
+{% for category, message in messages %}
+<div class="flash-banner flash-banner-{{ category }}">
+    <span class="flash-banner-icon">
+        {% if category == 'success' %}✅
+        {% elif category == 'error' %}❌
+        {% elif category == 'warning' %}⚠️
+        {% else %}ℹ️
+        {% endif %}
+    </span>
+    <span class="flash-banner-text">{{ message }}</span>
+    <button type="button" class="flash-banner-close" onclick="var b=this.parentElement;b.classList.add('hide');setTimeout(function(){b.remove()},300)">✕</button>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+{# ===== Toast 容器 ===== #}
+<div id="toastContainer" class="toast-container"></div>
+
+{# ===== 主内容区 ===== #}
+<main id="pjax-container" {% if not _pjax %}class="container"{% endif %}>
+{% block content %}{% endblock %}
+</main>
+
+{% if not _pjax %}
+{# ===== 暗色模式切换 ===== #}
+<script>
+(function () {
+    var STORAGE_KEY = 'mcmonitor_dark_mode';
+    var toggle = document.getElementById('darkModeToggle');
+
+    function applyDarkMode(isDark) {
+        if (isDark) {
+            document.body.classList.add('dark-mode');
+            toggle.textContent = '☀️';
+            toggle.title = '切换到浅色模式';
+        } else {
+            document.body.classList.remove('dark-mode');
+            toggle.textContent = '🌙';
+            toggle.title = '切换到深色模式';
+        }
+        if (window._applyAlertDarkMode) window._applyAlertDarkMode(isDark);
+    }
+
+    var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === null) {
+        applyDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
+    } else {
+        applyDarkMode(saved === '1');
+    }
+
+    toggle.addEventListener('click', function () {
+        var isDark = document.body.classList.contains('dark-mode');
+        var newIsDark = !isDark;
+        applyDarkMode(newIsDark);
+        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
+    });
+})();
+</script>
+
+{# ===== CSRF Token 辅助函数 ===== #}
+<script>
+function getCsrfToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+</script>
+
+{# ===== Toast 通知 ===== #}
+<script>
+function showToast(msg, type) {
+    var c = document.getElementById('toastContainer');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toastContainer';
+        c.className = 'toast-container';
+        document.body.appendChild(c);
+    }
+    var t = document.createElement('div');
+    t.className = 'toast toast-' + (type || 'info');
+    var icons = { success: '✓', error: '✗', info: 'ℹ' };
+    t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
+    c.appendChild(t);
+    setTimeout(function () {
+        t.style.animation = 'toastOut 0.3s ease forwards';
+        setTimeout(function () { if (t.parentElement) t.remove(); }, 300);
+    }, 4000);
+}
+</script>
+
+{# ===== 按钮提交反馈 ===== #}
+<script>
+document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (form.id === 'mkCmdForm') return;
+    var btn = form.querySelector('button[type="submit"]');
+    if (!btn || btn.classList.contains('btn-saving')) return;
+    btn.classList.add('btn-saving');
+    var origText = btn.textContent;
+    btn.textContent = '处理中...';
+    setTimeout(function () {
+        if (btn.classList.contains('btn-saving')) {
+            btn.classList.remove('btn-saving');
+            btn.textContent = origText;
+        }
+    }, 10000);
+});
+</script>
+
+{# ===== PWA Service Worker ===== #}
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/static/sw.js').then(function (reg) {
+            console.log('[SW] 注册成功:', reg.scope);
+        }).catch(function (err) {
+            console.log('[SW] 注册失败:', err);
+        });
+    });
+}
+</script>
+
+{# ===== PJAX 无刷新加载 ===== #}
+<script src="{{ url_for('static', filename='pjax.js') }}"></script>
+{% endif %}
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

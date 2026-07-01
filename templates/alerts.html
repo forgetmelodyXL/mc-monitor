@@ -1,57 +1,9 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>历史告警 - MC 服务器监控</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body class="dashboard-body">
+{% extends "layout.html" %}
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<div style="display:none">
-{% for category, message in messages %}
-<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
-{% endfor %}
-</div>
-{% endif %}
-{% endwith %}
 
-<header class="topbar">
-    <div class="topbar-inner">
-        <div class="brand">
-            <span class="brand-icon">⛏</span>
-            <span class="brand-text">MC 服务器监控</span>
-            <span class="brand-version">v{{ app_version }}</span>
-        </div>
-        <div class="topbar-right">
-            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
-            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
-            <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ username }} · {{ role_label }} ▾</button>
-                <div class="user-dropdown-menu">
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
-                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
-                    {% if session.get('is_admin') %}
-                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
-                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
-                    {% endif %}
-                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
-                    <div class="user-dropdown-divider"></div>
-                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
-                        {{ csrf_input() }}
-                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
-                            🚪 注销
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</header>
+{% block title %}历史告警 - MC 服务器监控{% endblock %}
 
-<main class="container">
+{% block content %}
     <section class="stats-row">
         <div class="stat-card stat-players">
             <div class="stat-label">告警总数</div>
@@ -157,40 +109,4 @@
             {% endif %}
         </div>
     </section>
-</main>
-
-<script>
-(function () {
-    const STORAGE_KEY = 'mcmonitor_dark_mode';
-    const toggle = document.getElementById('darkModeToggle');
-
-    function applyDarkMode(isDark) {
-        if (isDark) {
-            document.body.classList.add('dark-mode');
-            toggle.textContent = '☀️';
-            toggle.title = '切换到浅色模式';
-        } else {
-            document.body.classList.remove('dark-mode');
-            toggle.textContent = '🌙';
-            toggle.title = '切换到深色模式';
-        }
-    }
-
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === null) {
-        applyDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
-    } else {
-        applyDarkMode(saved === '1');
-    }
-
-    toggle.addEventListener('click', function () {
-        const isDark = document.body.classList.contains('dark-mode');
-        const newIsDark = !isDark;
-        applyDarkMode(newIsDark);
-        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
-    });
-})();
-</script>
-
-</body>
-</html>
+{% endblock %}

@@ -519,6 +519,12 @@ def inject_version():
     return {"app_version": APP_VERSION}
 
 
+@app.context_processor
+def inject_pjax():
+    """注入 _pjax 标志，用于 PJAX 无刷新加载时跳过布局外壳"""
+    return {"_pjax": request.headers.get("X-PJAX") == "true"}
+
+
 # ============================================================
 # 错误页面 & Favicon
 # ============================================================

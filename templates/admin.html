@@ -1,57 +1,8 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理后台 · MC 服务器监控</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body class="dashboard-body">
+{% extends "layout.html" %}
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<div style="display:none">
-{% for category, message in messages %}
-<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
-{% endfor %}
-</div>
-{% endif %}
-{% endwith %}
+{% block title %}管理后台 · MC 服务器监控{% endblock %}
 
-<header class="topbar">
-    <div class="topbar-inner">
-        <div class="brand">
-            <span class="brand-icon">⛏</span>
-            <span class="brand-text">MC 服务器监控</span>
-            <span class="brand-version">v{{ app_version }}</span>
-        </div>
-        <div class="topbar-right">
-            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
-            <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline">公共主页</a>
-            <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ current_username }} · {{ role_label }} ▾</button>
-                <div class="user-dropdown-menu">
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
-                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
-                    {% if session.get('is_admin') %}
-                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
-                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
-                    {% endif %}
-                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
-                    <div class="user-dropdown-divider"></div>
-                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
-                        {{ csrf_input() }}
-                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
-                            🚪 注销
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</header>
-
-<main class="container">
+{% block content %}
     <section class="hero" style="padding: 12px 0 0 0; text-align: left;">
         <h2 style="margin-top: 0;">🛡 管理后台</h2>
         <p class="hero-sub" style="margin-bottom: 12px;">
@@ -422,72 +373,9 @@
         </div>
     </div>
 </div>
-</main>
-<script>
-(function () {
-    var toggle = document.getElementById('darkModeToggle');
-    var STORAGE_KEY = 'mcmonitor_dark_mode';
+{% endblock %}
 
-    function applyDarkMode(isDark) {
-        if (isDark) {
-            document.body.classList.add('dark-mode');
-            toggle.textContent = '☀️';
-            toggle.title = '切换到浅色模式';
-        } else {
-            document.body.classList.remove('dark-mode');
-            toggle.textContent = '🌙';
-            toggle.title = '切换到深色模式';
-        }
-    }
-
-    function init() {
-        var saved = localStorage.getItem(STORAGE_KEY);
-        if (saved === null) {
-            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            applyDarkMode(prefersDark);
-        } else {
-            applyDarkMode(saved === '1');
-        }
-    }
-
-    toggle.addEventListener('click', function () {
-        var isDark = document.body.classList.contains('dark-mode');
-        var newIsDark = !isDark;
-        applyDarkMode(newIsDark);
-        localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
-    });
-
-    init();
-})();
-
-// ---- 按钮点击反馈 ----
-(function () {
-    function showToast(msg, type) {
-        var c = document.getElementById('toastContainer');
-        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
-        var t = document.createElement('div');
-        t.className = 'toast toast-' + (type || 'info');
-        var icons = { success: '✓', error: '✗', info: 'ℹ' };
-        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
-        c.appendChild(t);
-        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
-    }
-
-    document.addEventListener('submit', function (e) {
-        var btn = e.target.querySelector('button[type="submit"]');
-        if (!btn || btn.classList.contains('btn-saving')) return;
-        btn.classList.add('btn-saving');
-        if (btn.textContent.length < 10) btn.textContent = '处理中...';
-    });
-
-    var flashes = document.querySelectorAll('.flash');
-    flashes.forEach(function (f) {
-        var isError = f.classList.contains('flash-error');
-        showToast(f.textContent.trim(), isError ? 'error' : 'success');
-        f.style.display = 'none';
-    });
-})();
-</script>
+{% block scripts %}
 <script>
 let roleModalUserId = null;
 
@@ -619,5 +507,4 @@ function saveEmailToggle(checkbox, field) {
     });
 }
 </script>
-</body>
-</html>
+{% endblock %}

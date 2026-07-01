@@ -1,69 +1,12 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ session.get('_csrf_token', '') }}">
-    <title>仪表盘 - MC 服务器监控</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-</head>
-<body class="dashboard-body">
+{% extends "layout.html" %}
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<div class="flash-banner-container">
-{% for category, message in messages %}
-<div class="flash-banner flash-banner-{{ category }}">
-    <span class="flash-banner-icon">
-        {% if category == 'success' %}✅
-        {% elif category == 'error' %}❌
-        {% elif category == 'warning' %}⚠️
-        {% else %}ℹ️
-        {% endif %}
-    </span>
-    <span class="flash-banner-text">{{ message }}</span>
-    <button type="button" class="flash-banner-close" onclick="var b=this.parentElement;b.classList.add('hide');setTimeout(function(){b.remove()},300)">✕</button>
-</div>
-{% endfor %}
-</div>
-{% endif %}
-{% endwith %}
+{% block title %}仪表盘 - MC 服务器监控{% endblock %}
 
-<header class="topbar">
-    <div class="topbar-inner">
-        <div class="brand">
-            <span class="brand-icon">⛏</span>
-            <span class="brand-text">MC 服务器监控</span>
-            <span class="brand-version">v{{ app_version }}</span>
-        </div>
-        <div class="topbar-right">
-            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
-            <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">公共主页</a>
-            <div class="user-dropdown">
-                <button class="user-dropdown-btn user-tag">{{ username }} · {{ role_label }} ▾</button>
-                <div class="user-dropdown-menu" id="userDropdownMenu">
-                    <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
-                    <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
-                    {% if session.get('is_admin') %}
-                        <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
-                        <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
-                    {% endif %}
-                    <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
-                    <div class="user-dropdown-divider"></div>
-                    <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
-                        {{ csrf_input() }}
-                        <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
-                            🚪 注销
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</header>
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
 
-<main class="container">
+{% block content %}
     <section class="stats-row" id="statsRow">
         <div class="stat-card">
             <div class="stat-label">服务器总数</div>
@@ -319,7 +262,6 @@
         </div>
         {% endif %}
     </section>
-</main>
 
 <!-- ========== 在线玩家模态框 ========== -->
 <div class="modal-overlay hidden" id="playersModal">
@@ -434,6 +376,43 @@
     </div>
 </div>
 
+<!-- 排序弹窗 -->
+<div class="modal-overlay" id="sortModal" style="display:none;" onclick="if(event.target===this) closeSortModal()">
+    <div class="modal-content" style="max-width:480px;">
+        <div class="modal-header">
+            <h3>修改服务器排序</h3>
+            <button type="button" class="modal-close" onclick="closeSortModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="color: #6b6f8a; margin: 0 0 8px 0;">使用 ▲▼ 按钮调整顺序，保存后服务器列表将按此处顺序显示</p>
+            <ul id="sortList" style="list-style: none; padding: 0; margin: 0;"></ul>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeSortModal()">取消</button>
+            <button type="button" class="btn btn-primary" onclick="submitSortOrder()">保存排序</button>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="modal-overlay" id="confirmOverlay" style="display:none;">
+    <div class="modal-content" style="max-width:400px;">
+        <div class="modal-header" style="border-bottom-color:#fde8e8; background:#fff5f5;">
+            <h3>⚠️ 确认删除</h3>
+            <button type="button" class="modal-close" onclick="closeConfirm()">✕</button>
+        </div>
+        <div class="modal-body" style="text-align:center; padding:24px 20px;">
+            <p id="confirmMsg" style="margin:0; font-size:14px; color:#555; line-height:1.6;"></p>
+        </div>
+        <div class="modal-footer" style="justify-content:center; gap:12px;">
+            <button type="button" class="btn btn-sm" onclick="closeConfirm()" style="background:#eef0f7; color:#2a2e5b;">取消</button>
+            <button type="button" class="btn btn-sm btn-danger" id="confirmOkBtn" onclick="doConfirm()">确认删除</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
 <script>
 (function () {
     const API_STATUS = "{{ url_for('api_status') }}";
@@ -1369,83 +1348,6 @@
         window._applyAlertDarkMode = applyAlertDarkMode;
     })();
 
-    // ---- Dark Mode Toggle ----
-    (function () {
-        const STORAGE_KEY = 'mcmonitor_dark_mode';
-        const toggle = document.getElementById('darkModeToggle');
-
-        function applyDarkMode(isDark) {
-            if (isDark) {
-                document.body.classList.add('dark-mode');
-                toggle.textContent = '☀️';
-                toggle.title = '切换到浅色模式';
-            } else {
-                document.body.classList.remove('dark-mode');
-                toggle.textContent = '🌙';
-                toggle.title = '切换到深色模式';
-            }
-            if (window._applyAlertDarkMode) window._applyAlertDarkMode(isDark);
-        }
-
-        function init() {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved === null) {
-                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                applyDarkMode(prefersDark);
-            } else {
-                applyDarkMode(saved === '1');
-            }
-        }
-
-        toggle.addEventListener('click', function () {
-            const isDark = document.body.classList.contains('dark-mode');
-            const newIsDark = !isDark;
-            applyDarkMode(newIsDark);
-            localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
-        });
-
-        init();
-    })();
-
-    // ---- PWA: 注册 Service Worker ----
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function () {
-            navigator.serviceWorker.register('/static/sw.js').then(function (reg) {
-                console.log('[SW] 注册成功:', reg.scope);
-            }).catch(function (err) {
-                console.log('[SW] 注册失败:', err);
-            });
-        });
-    }
-
-    // ---- 按钮点击反馈：所有表单提交时显示加载状态 ----
-    function showToast(msg, type) {
-        var c = document.getElementById('toastContainer');
-        if (!c) { c = document.createElement('div'); c.id = 'toastContainer'; c.className = 'toast-container'; document.body.appendChild(c); }
-        var t = document.createElement('div');
-        t.className = 'toast toast-' + (type || 'info');
-        var icons = { success: '✓', error: '✗', info: 'ℹ' };
-        t.innerHTML = '<span class="toast-icon">' + (icons[type] || '') + '</span><span class="toast-msg">' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">x</span>';
-        c.appendChild(t);
-        setTimeout(function () { t.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(function () { if (t.parentElement) t.remove(); }, 300); }, 4000);
-    }
-
-    document.addEventListener('submit', function (e) {
-        var form = e.target;
-        if (form.id === 'mkCmdForm') return;  // 跳过麦块命令表单
-        var btn = form.querySelector('button[type="submit"]');
-        if (!btn || btn.classList.contains('btn-saving')) return;
-        btn.classList.add('btn-saving');
-        var origText = btn.textContent;
-        btn.textContent = '处理中...';
-        setTimeout(function () {
-            if (btn.classList.contains('btn-saving')) {
-                btn.classList.remove('btn-saving');
-                btn.textContent = origText;
-            }
-        }, 10000);
-    });
-
     // 顶部提示条：动画结束后移除 DOM
     (function () {
         var banners = document.querySelectorAll('.flash-banner');
@@ -1458,48 +1360,7 @@
         });
     })();
 })();
-
-// CSRF Token 获取函数（从 base.html 复制过来，因为 dashboard.html 没有继承 base）
-function getCsrfToken() {
-    var meta = document.querySelector('meta[name="csrf-token"]');
-    return meta ? meta.getAttribute('content') : '';
-}
 </script>
-
-<!-- 排序弹窗 -->
-<div class="modal-overlay" id="sortModal" style="display:none;" onclick="if(event.target===this) closeSortModal()">
-    <div class="modal-content" style="max-width:480px;">
-        <div class="modal-header">
-            <h3>修改服务器排序</h3>
-            <button type="button" class="modal-close" onclick="closeSortModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-            <p style="color: #6b6f8a; margin: 0 0 8px 0;">使用 ▲▼ 按钮调整顺序，保存后服务器列表将按此处顺序显示</p>
-            <ul id="sortList" style="list-style: none; padding: 0; margin: 0;"></ul>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-outline" onclick="closeSortModal()">取消</button>
-            <button type="button" class="btn btn-primary" onclick="submitSortOrder()">保存排序</button>
-        </div>
-    </div>
-</div>
-
-<!-- 删除确认弹窗 -->
-<div class="modal-overlay" id="confirmOverlay" style="display:none;">
-    <div class="modal-content" style="max-width:400px;">
-        <div class="modal-header" style="border-bottom-color:#fde8e8; background:#fff5f5;">
-            <h3>⚠️ 确认删除</h3>
-            <button type="button" class="modal-close" onclick="closeConfirm()">✕</button>
-        </div>
-        <div class="modal-body" style="text-align:center; padding:24px 20px;">
-            <p id="confirmMsg" style="margin:0; font-size:14px; color:#555; line-height:1.6;"></p>
-        </div>
-        <div class="modal-footer" style="justify-content:center; gap:12px;">
-            <button type="button" class="btn btn-sm" onclick="closeConfirm()" style="background:#eef0f7; color:#2a2e5b;">取消</button>
-            <button type="button" class="btn btn-sm btn-danger" id="confirmOkBtn" onclick="doConfirm()">确认删除</button>
-        </div>
-    </div>
-</div>
 
 <script>
 var _confirmTargetForm = null;
@@ -1641,5 +1502,4 @@ async function submitSortOrder() {
     }
 })();
 </script>
-</body>
-</html>
+{% endblock %}

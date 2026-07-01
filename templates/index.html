@@ -1,60 +1,8 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MC 服务器监控 · 公共主页</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body class="dashboard-body">
+{% extends "layout.html" %}
 {% from "base.html" import csrf_input with context %}
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<div style="display:none">
-{% for category, message in messages %}
-<div class="flash {% if category == 'error' %}flash-error{% endif %}">{{ message }}</div>
-{% endfor %}
-</div>
-{% endif %}
-{% endwith %}
+{% block title %}MC 服务器监控 · 公共主页{% endblock %}
 
-<header class="topbar">
-    <div class="topbar-inner">
-        <div class="brand">
-            <span class="brand-icon">⛏</span>
-            <span class="brand-text">MC 服务器监控</span>
-            <span class="brand-version">v{{ app_version }}</span>
-        </div>
-        <div class="topbar-right">
-            <button class="dark-mode-toggle" id="darkModeToggle" title="切换深色/浅色模式">🌙</button>
-            {% if logged_in %}
-                <div class="user-dropdown">
-                    <button class="user-dropdown-btn user-tag">{{ current_username }} · {{ role_label }} ▾</button>
-                    <div class="user-dropdown-menu">
-                        <a href="{{ url_for('user_profile') }}" class="user-dropdown-item">👤 个人资料</a>
-                        <a href="{{ url_for('dashboard') }}" class="user-dropdown-item">🖥 管理服务器</a>
-                        {% if session.get('is_admin') %}
-                            <a href="{{ url_for('admin_panel') }}" class="user-dropdown-item">🛡 管理后台</a>
-                            <a href="{{ url_for('metrics') }}" class="user-dropdown-item">📊 监控指标</a>
-                        {% endif %}
-                        <a href="{{ url_for('alerts_history') }}" class="user-dropdown-item">📜 历史告警</a>
-                        <div class="user-dropdown-divider"></div>
-                        <form method="POST" action="{{ url_for('logout') }}" style="margin: 0;">
-                            {{ csrf_input() }}
-                            <button type="submit" class="user-dropdown-item user-dropdown-item-logout">
-                                🚪 注销
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            {% else %}
-                <a href="{{ url_for('login') }}" class="btn btn-sm btn-primary">登录</a>
-                <a href="{{ url_for('register') }}" class="btn btn-sm btn-outline">注册</a>
-            {% endif %}
-        </div>
-    </div>
-</header>
-
+{% block content %}
 <main class="container">
     <section class="hero">
         <div class="hero-title">🌐 公共 Minecraft 服务器总览</div>
@@ -164,7 +112,9 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 (function () {
     const API_STATUS = "{{ url_for('api_public_status') }}";
@@ -295,43 +245,6 @@
     refresh();
     {% endif %}
 
-    // ---- Dark Mode Toggle ----
-    (function () {
-        var toggle = document.getElementById('darkModeToggle');
-        var STORAGE_KEY = 'mcmonitor_dark_mode';
-
-        function applyDarkMode(isDark) {
-            if (isDark) {
-                document.body.classList.add('dark-mode');
-                toggle.textContent = '☀️';
-                toggle.title = '切换到浅色模式';
-            } else {
-                document.body.classList.remove('dark-mode');
-                toggle.textContent = '🌙';
-                toggle.title = '切换到深色模式';
-            }
-        }
-
-        function init() {
-            var saved = localStorage.getItem(STORAGE_KEY);
-            if (saved === null) {
-                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                applyDarkMode(prefersDark);
-            } else {
-                applyDarkMode(saved === '1');
-            }
-        }
-
-        toggle.addEventListener('click', function () {
-            var isDark = document.body.classList.contains('dark-mode');
-            var newIsDark = !isDark;
-            applyDarkMode(newIsDark);
-            localStorage.setItem(STORAGE_KEY, newIsDark ? '1' : '0');
-        });
-
-        init();
-    })();
-
     // ---- 公共页面「更多」玩家弹窗 ----
     function escapeHtml(str) {
         var div = document.createElement('div');
@@ -374,5 +287,4 @@
     });
 })();
 </script>
-</body>
-</html>
+{% endblock %}
