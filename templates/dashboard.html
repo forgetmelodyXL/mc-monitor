@@ -254,8 +254,6 @@
                 </tbody>
             </table>
         </div>
-        <!-- 图表区域（独立于表格，避免干扰拖拽排序） -->
-        <div id="chartArea" style="margin-top: 12px;"></div>
         {% else %}
         <div class="empty-state">
             <p>你还没有添加任何服务器，先在上方添加一台吧！</p>
@@ -977,9 +975,9 @@
     }
 
     async function _loadAndRenderChart(serverId, row) {
-        const chartArea = document.getElementById('chartArea');
-        let chartSection = chartArea.querySelector('.chart-section[data-server-id="' + serverId + '"]');
-        const canvas = chartSection ? chartSection.querySelector('.server-chart') : null;
+        const tbody = document.getElementById('serverTableBody');
+        const chartRow = tbody ? tbody.querySelector('.chart-row[data-server-id="' + serverId + '"]') : null;
+        const canvas = chartRow ? chartRow.querySelector('.server-chart') : null;
         if (!canvas) return;
 
         if (_chartInstances[serverId]) {
@@ -1133,16 +1131,17 @@
         btn.addEventListener('click', async function () {
             const id = parseInt(this.dataset.serverId, 10);
             const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
-            const chartArea = document.getElementById('chartArea');
-            let chartSection = chartArea.querySelector('.chart-section[data-server-id="' + id + '"]');
+            const tbody = document.getElementById('serverTableBody');
+            let chartRow = tbody.querySelector('.chart-row[data-server-id="' + id + '"]');
 
             const btnText = this.textContent.trim();
             if (btnText === '📈 图表') {
-                if (!chartSection) {
-                    chartSection = document.createElement('div');
-                    chartSection.className = 'chart-section';
-                    chartSection.dataset.serverId = id;
-                    chartSection.innerHTML = '<div class="server-chart-box">'
+                if (!chartRow) {
+                    chartRow = document.createElement('tr');
+                    chartRow.className = 'chart-row';
+                    chartRow.dataset.serverId = id;
+                    chartRow.innerHTML = '<td colspan="9" style="padding: 0;">'
+                        + '<div class="server-chart-box">'
                         + '<div class="server-chart-header">'
                         + '<span class="meta-label" style="margin: 0;">📈 状态历史（最近 60 条）</span>'
                         + '<button type="button" class="btn btn-sm btn-chart-close" data-server-id="' + id + '" style="padding: 2px 8px; font-size: 12px;">收起</button>'
@@ -1150,15 +1149,17 @@
                         + '<div style="position: relative; height: 160px;">'
                         + '<canvas class="server-chart" data-server-id="' + id + '"></canvas>'
                         + '</div>'
-                        + '</div>';
-                    chartArea.appendChild(chartSection);
-                    // Add close button listener
-                    chartSection.querySelector('.btn-chart-close').addEventListener('click', function () {
+                        + '</div>'
+                        + '</td>';
+                    // 插入到服务器行后面
+                    row.insertAdjacentElement('afterend', chartRow);
+                    // 关闭按钮
+                    chartRow.querySelector('.btn-chart-close').addEventListener('click', function () {
                         const sid = parseInt(this.dataset.serverId, 10);
-                        const section = chartArea.querySelector('.chart-section[data-server-id="' + sid + '"]');
-                        if (section) {
+                        const cr = tbody.querySelector('.chart-row[data-server-id="' + sid + '"]');
+                        if (cr) {
                             if (_chartInstances[sid]) { _chartInstances[sid].destroy(); delete _chartInstances[sid]; }
-                            section.remove();
+                            cr.remove();
                         }
                         const r = document.querySelector('.server-row[data-server-id="' + sid + '"]');
                         if (r) {
@@ -1170,31 +1171,34 @@
                 this.textContent = '📈 收起';
                 await _loadAndRenderChart(id, row);
             } else {
-                if (chartSection) {
+                if (chartRow) {
                     if (_chartInstances[id]) { _chartInstances[id].destroy(); delete _chartInstances[id]; }
-                    chartSection.remove();
+                    chartRow.remove();
                 }
                 this.textContent = '📈 图表';
             }
         });
     });
 
-    // ---- 收起图表按钮（委托给 chartArea） ----
-    document.getElementById('chartArea').addEventListener('click', function (e) {
-        if (e.target.classList.contains('btn-chart-close')) {
-            const id = parseInt(e.target.dataset.serverId, 10);
-            const section = this.querySelector('.chart-section[data-server-id="' + id + '"]');
-            if (section) {
-                if (_chartInstances[id]) { _chartInstances[id].destroy(); delete _chartInstances[id]; }
-                section.remove();
+    // ---- 收起图表按钮（委托给 serverTableBody） ----
+    var serverTableBody = document.getElementById('serverTableBody');
+    if (serverTableBody) {
+        serverTableBody.addEventListener('click', function (e) {
+            if (e.target.classList.contains('btn-chart-close')) {
+                const id = parseInt(e.target.dataset.serverId, 10);
+                const chartRow = this.querySelector('.chart-row[data-server-id="' + id + '"]');
+                if (chartRow) {
+                    if (_chartInstances[id]) { _chartInstances[id].destroy(); delete _chartInstances[id]; }
+                    chartRow.remove();
+                }
+                const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
+                if (row) {
+                    const showBtn = row.querySelector('.btn-show-chart');
+                    if (showBtn) showBtn.textContent = '📈 图表';
+                }
             }
-            const row = document.querySelector('.server-row[data-server-id="' + id + '"]');
-            if (row) {
-                const showBtn = row.querySelector('.btn-show-chart');
-                if (showBtn) showBtn.textContent = '📈 图表';
-            }
-        }
-    });
+        });
+    }
 
     // ---- 告警通知系统 ----
     (function () {

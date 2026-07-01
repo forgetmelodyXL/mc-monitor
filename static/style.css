@@ -1507,13 +1507,13 @@ body.dark-mode .server-id-cell {
     padding: 0 10px 14px 10px !important;
     border-bottom: 1px solid #eef1f7;
 }
-.chart-section .server-chart-box {
+.chart-row td .server-chart-box {
     background: #fbfcff;
     border: 1px solid #e6e8f3;
     border-radius: 8px;
     padding: 12px;
 }
-.chart-section .server-chart-header {
+.chart-row td .server-chart-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1676,7 +1676,7 @@ body.dark-mode .server-row .server-addr-cell {
 body.dark-mode .drag-handle {
     color: #5a5a7a;
 }
-body.dark-mode .chart-section .server-chart-box {
+body.dark-mode .chart-row td .server-chart-box {
     background: var(--dm-surface);
     border-color: var(--dm-border);
 }
